@@ -1,0 +1,602 @@
+/**************************************************************************************
+* 
+* CdL Magistrale in Ingegneria Informatica
+* Corso di Architetture e Programmazione dei Sistemi di Elaborazione - a.a. 2020/21
+* 
+* Progetto dell'algoritmo Attention mechanism 221 231 a
+* in linguaggio assembly x86-32 + SSE
+* 
+* Fabrizio Angiulli, novembre 2022
+* 
+**************************************************************************************/
+
+/*
+* 
+* Software necessario per l'esecuzione:
+* 
+*    NASM (www.nasm.us)
+*    GCC (gcc.gnu.org)
+* 
+* entrambi sono disponibili come pacchetti software 
+* installabili mediante il packaging tool del sistema 
+* operativo; per esempio, su Ubuntu, mediante i comandi:
+* 
+*    sudo apt-get install nasm
+*    sudo apt-get install gcc
+* 
+* potrebbe essere necessario installare le seguenti librerie:
+* 
+*    sudo apt-get install lib32gcc-4.8-dev (o altra versione)
+*    sudo apt-get install libc6-dev-i386
+* 
+* Per generare il file eseguibile:
+* 
+* nasm -f elf32 att32.nasm && gcc -m32 -msse -O0 -no-pie sseutils32.o att32.o att32c.c -o att32c -lm && ./att32c $pars
+* 
+* oppure
+* 
+* ./runatt32
+* 
+*/
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <math.h>
+#include <string.h>
+#include <time.h>
+#include <libgen.h>
+#include <xmmintrin.h>
+
+#define	type		float
+#define	MATRIX		type*
+#define	VECTOR		type*
+
+typedef struct {
+	MATRIX ds; 		// dataset
+	VECTOR labels; 	// etichette
+	int* out;		// vettore contenente risultato dim=k
+	type sc;		// score dell'insieme di features risultato
+	int k;			// numero di features da estrarre
+	int N;			// numero di righe del dataset
+	int d;			// numero di colonne/feature del dataset
+	int display;
+	int silent;
+} params;
+
+/*
+*	Le funzioni sono state scritte assumento che le matrici siano memorizzate 
+* 	mediante un array (float*), in modo da occupare un unico blocco
+* 	di memoria, ma a scelta del candidato possono essere 
+* 	memorizzate mediante array di array (float**).
+* 
+* 	In entrambi i casi il candidato dovr� inoltre scegliere se memorizzare le
+* 	matrici per righe (row-major order) o per colonne (column major-order).
+*
+* 	L'assunzione corrente � che le matrici siano in row-major order.
+* 
+*/
+
+//riserva un blocco di memoria
+void* get_block(int size, int elements) {
+	return _mm_malloc(elements*size,16);
+    //è generalmente utilizzata per allocare memoria allineata
+    //in modo specifico per migliorare le prestazioni delle istruzioni SIMD.
+}
+
+//libera il blocco di memoria
+void free_block(void* p) { 
+	_mm_free(p);
+}
+
+//Alloca una matrice di float* (MATRIX)
+MATRIX alloc_matrix(int rows, int cols) {
+	return (MATRIX) get_block(sizeof(type),rows*cols);
+}
+
+//Alloca una matrice di int*
+int* alloc_int_matrix(int rows, int cols) {
+	return (int*) get_block(sizeof(int),rows*cols);
+}
+
+//Dealloca le matrici
+void dealloc_matrix(void* mat) {
+	free_block(mat);
+}
+
+/*
+* 
+* 	load_data
+* 	=========
+* 
+*	Legge da file una matrice di N righe
+* 	e M colonne e la memorizza in un array lineare in row-major order
+* 
+* 	Codifica del file:
+* 	primi 4 byte: numero di righe (N) --> numero intero
+* 	successivi 4 byte: numero di colonne (M) --> numero intero
+* 	successivi N*M*4 byte: matrix data in row-major order --> numeri floating-point a precisione singola
+* 
+*****************************************************************************
+*	Se lo si ritiene opportuno, � possibile cambiare la codifica in memoria
+* 	della matrice. 
+*****************************************************************************
+* 
+*/
+MATRIX load_data(char* filename, int *n, int *k) {
+	FILE* fp;
+	int rows, cols, status, i;
+	
+	fp = fopen(filename, "rb"); //apre il file in lettura binaria
+	
+	if (fp == NULL){
+		printf("'%s': nome del file errato!\n", filename);
+		exit(0);
+	}
+
+
+    //leggono rispettivamente la dimensione della riga e della colonna della matrice mettendoli nelle apposite variabili
+	status = fread(&cols, sizeof(int), 1, fp);
+    //ptr: puntatore al blocco di memoria in cui verranno memorizzati i dati
+    //size: dimensione in byte dei dati
+    //n: numero di elementi da leggere
+    //stream: puntatore al file da cui leggere i dati
+
+	status = fread(&rows, sizeof(int), 1, fp);
+
+    //alloca la matrice "data" con dimensione rows e cols
+	MATRIX data = alloc_matrix(rows,cols);
+
+    //popola la matrice con gli elementi all'interno del file
+	status = fread(data, sizeof(type), rows*cols, fp);
+	fclose(fp);
+
+    //assegna ai valori puntati da n e k il numero di righe e il numero di colonne
+	*n = rows;
+	*k = cols;
+	
+	return data;
+}
+
+/*
+* 	save_data
+* 	=========
+* 
+*	Salva su file un array lineare in row-major order
+*	come matrice di N righe e M colonne
+* 
+* 	Codifica del file:
+* 	primi 4 byte: numero di righe (N) --> numero intero a 32 bit
+* 	successivi 4 byte: numero di colonne (M) --> numero intero a 32 bit
+* 	successivi N*M*4 byte: matrix data in row-major order --> numeri interi o floating-point a precisione singola
+*/
+void save_data(char* filename, void* X, int n, int k) {
+
+    //X rappresenta la matrice di dati linearizzata (return della funzione load_data)
+
+	FILE* fp;
+	int i;
+	fp = fopen(filename, "wb"); //apre il file in lettura binaria
+    //Se in X è presente qualcosa imposta le dimensioni della matrice nel file
+	if(X != NULL){
+        //k righe, n colonne
+		fwrite(&k, 4, 1, fp);
+		fwrite(&n, 4, 1, fp);
+        //copia gli elementi di X nel file
+		for (i = 0; i < n; i++) {
+			fwrite(X, sizeof(type), k, fp);
+            //printf("%i %i\n", ((int*)X)[0], ((int*)X)[1]);
+            //sposta il puntatore di X alla colonna successiva della matrice
+			X += sizeof(type)*k;
+		}
+	}
+    //Altrimenti imposta nel file la matice a dimensione 0
+	else{
+		int x = 0;
+		fwrite(&x, 4, 1, fp);
+		fwrite(&x, 4, 1, fp);
+	}
+	fclose(fp);
+}
+
+/*
+* 	save_out
+* 	=========
+* 
+*	Salva su file un array lineare composto da k+1 elementi.
+* 
+* 	Codifica del file:
+* 	primi 4 byte: contenenti l'intero 1 		--> numero intero a 32 bit
+* 	successivi 4 byte: numero di elementi (k+1) --> numero intero a 32 bit
+* 	successivi byte: elementi del vettore 		--> 1 numero floating-point a precisione singola e k interi
+*/
+void save_out(char* filename, type sc, int* X, int k) {
+	FILE* fp;
+	int i;
+	int n = 1;
+	k++;
+	fp = fopen(filename, "wb");
+	if(X != NULL){
+        //imposta dimensione righe e colonne della matrice linearizzata
+		fwrite(&n, 4, 1, fp);
+		fwrite(&k, 4, 1, fp);
+        //scrive lo score dell'insieme di feature
+		fwrite(&sc, sizeof(type), 1, fp);
+        //svrive i dati della matrice linearizzata
+		fwrite(X, sizeof(int), k, fp);
+        //printf("%i %i\n", ((int*)X)[0], ((int*)X)[1]);
+	}
+	fclose(fp);
+}
+
+// PROCEDURE ASSEMBLY
+
+extern void prova(params* input);
+
+type media_valori_0_f(params* input, int f){
+    type somma=0;
+    int contatore=0;
+    int cont=0;
+
+    for (int i=f; i<input->N*input->d; i+=input->d){
+        //printf("%d",(int)input->labels[i%input->N]);
+        cont++;
+        //printf("i=%d | j=%d,",i,i/input->d);
+        if (input->labels[i/input->d]==0){//Magaria per scorrere il vettore label attraverso l'indice del for
+            //printf("%f,",input->ds[i]);
+            //printf("%f,",input->labels[(i%input->N)/input->d]);
+            somma=somma+input->ds[i];
+            contatore++;
+        }
+    }
+    //printf("contatore di 0: %d\n",contatore);
+    //printf("Iterazioni totali: %d", cont);
+    return somma/contatore;
+}
+type media_valori_1_f(params* input, int f){
+    type somma=0;
+    int contatore=0;
+    int cont=0;
+
+    for (int i=f; i<input->N*input->d; i+=input->d){
+        cont++;
+        if (input->labels[i/input->d]==1){
+            somma=somma+input->ds[i];
+            contatore++;
+        }
+    }
+    return somma/contatore;
+}
+
+//GIUSTISSIMO
+int conta_elementi_1(params* input){
+    int contatore=0;
+    for (int i = 0; i < (input->N); i++) {
+        //printf("%d",(int)input->labels[i]);
+        if (input->labels[i]==0){
+            contatore++;
+        }
+    }
+    return contatore;
+}
+
+//GIUSTO
+type calcola_media(params* input, int f){
+    type somma=0;
+    int contatore=0;
+    for (int i=f; i<input->N*input->d; i+=input->d){
+        //printf("%f,",input->ds[i]);
+        somma=somma+input->ds[i];
+        contatore++;
+    }
+    //printf("Ho contato %d elementi della feature %f\n",contatore,input->ds[f]);
+    return somma/(input->N);
+}
+
+//GIUSTO
+type deviazione_standard_c(params* input, int f){
+
+    //printf("Il primo valore è %f\n", input->ds[0]);
+    int conta=0;
+
+     type u=calcola_media(input,f);
+
+    //printf("La media è: %f\n",u);
+    type xi=0;
+    type somma=0;
+    //for(int i=0; i<5; i++) {
+    //    xi=input->ds[i*input->d];
+        //printf("Sto leggendo il valore %f\n", xi);
+    //}
+    for(int i=f; i<input->N*input->d; i+=input->d){
+        xi=input->ds[i];
+        //printf("Sto leggendo il valore %f\n", xi);
+
+        conta++;
+        //printf("A%f,",pow(xi-u,2));
+        somma = somma + pow(xi-u,2);
+        //printf("%f,",somma);
+    }
+    //printf("Ho letto %d valori\n",conta);
+    //printf("La somma finale è: %f\n",somma);
+    return sqrt((1.0/((input->N)-1)*somma));
+}
+
+type calcola_rcf(params* input, int f){
+    //printf("______________________________________\n");
+    int n1= conta_elementi_1(input);
+    //printf("Elementi 1: %d\n",n1);
+    int n0= input->N-n1;
+    //printf("Elementi 0: %d\n",n0);
+
+
+
+    type mu0=media_valori_0_f(input,f);
+    //printf("Media valori 0: %f\n",mu0);
+    type mu1=media_valori_1_f(input,f);
+    //printf("Media valori 1: %f\n",mu1);
+
+    int n= n0+n1;
+    //printf("Totale elementi: %d\n",n);
+
+    type sf= deviazione_standard_c(input,f);
+    //printf("Deviazione standard: %f\n",sf);
+
+    printf("RCF: %f\n",((mu0-mu1)/sf)* sqrt((n0*n1)/ pow(n,2)));
+
+    return ((mu0-mu1)/sf)* sqrt((n0*n1)/ pow(n,2)); //Rcf
+
+}
+
+type calcola_rff(params* input, int fx, int fy, int cont){
+    type mux = calcola_media(input,fx);
+    type muy= calcola_media(input,fy);
+    type sommatoria1=0;
+    type sommatoria2=0;
+    type sommatoria3=0;
+    int f_max=0;
+    int gap=0;
+
+    if (fx>fy){
+        f_max=fx;
+        gap=fx-fy;
+        for(int i=f_max; i<input->N*input->d; i+=input->d) {
+            //printf("%f,",input->ds[i-gap]);
+            sommatoria1+=((input->ds[i]-mux)*(input->ds[i-gap]-muy));
+            sommatoria2+=(pow(input->ds[i]-mux,2));
+            sommatoria3+=(pow(input->ds[i-gap]-muy,2));
+        }
+    } else{
+        f_max=fy;
+        gap=fy-fx;
+        for(int i=f_max; i<input->N*input->d; i+=input->d) {
+            sommatoria1+=((input->ds[i-gap]-mux)*(input->ds[i]-muy));
+            sommatoria2+=(pow(input->ds[i-gap]-mux,2));
+            sommatoria3+=(pow(input->ds[i]-muy,2));
+        }
+    }
+    printf("RFF n %d: %f\n",cont,sommatoria1/(sqrt(sommatoria2)* sqrt(sommatoria3)));
+    return sommatoria1/(sqrt(sommatoria2)* sqrt(sommatoria3));
+}
+
+//È GIUSTO PERÒ CÈ UN FIXME
+type calcola_merit(params* input, int f){
+    type rcf= calcola_rcf(input, f);
+    //TODO in rff devo passare la feature passata e confrontarla con tutte le altre feature in input->out
+    type rff= calcola_rff(input,f,3,0);
+    return (input->k* abs(rcf))/(sqrt(input->k+(input->k*(input->k-1)* abs(rff))));
+    //FIXME rcf e rff non sono periodici, lo devono essere(forse)
+
+}
+
+void cfs(params* input){
+    //TODO devo restituire il merit migliore, nonchè tutte le k feature che hanno il miglior merit,
+    // per fare ciò si posono mettere tutti i merit in un array e selezionare solo i migliori k
+	// ------------------------------------------------------------
+	// Codificare qui l'algoritmo di Correlation Features Selection
+	// ------------------------------------------------------------
+    type merit_attuale=0;
+    type merit_max=0;
+
+    //input->out[0]=0;
+    int s_size=0;
+    while(s_size<=input->k){
+        for(int i=1; i<input->d; i++){ //per ogni feature f (in questo caso d)
+            merit_attuale = calcola_merit(input,i); //passo la feature i-esima
+            if (merit_attuale>merit_max){
+                merit_max=merit_attuale;
+            }
+        }
+        s_size++;
+    }
+}
+
+int main(int argc, char** argv) {
+
+	char fname[256];
+	char* dsfilename = NULL;
+	char* labelsfilename = NULL;
+	clock_t t;
+	float time;
+
+	//
+	// Imposta i valori di default dei parametri
+	//
+
+	params* input = malloc(sizeof(params));
+
+	input->ds = NULL;
+	input->labels = NULL;
+	input->k = -1;
+	input->sc = -1;
+
+	input->silent = 0;
+	input->display = 0;
+
+	//
+	// Visualizza la sintassi del passaggio dei parametri da riga di comando
+	//
+
+	if(argc <= 1){
+		printf("%s -ds <DS> -labels <LABELS> -k <K> [-s] [-d]\n", argv[0]);
+		printf("\nParameters:\n");
+		printf("\tDS: il nome del file ds2 contenente il dataset\n");
+		printf("\tLABELS: il nome del file ds2 contenente le etichette\n");
+		printf("\tk: numero di features da estrarre\n");
+		printf("\nOptions:\n");
+		printf("\t-s: modo silenzioso, nessuna stampa, default 0 - false\n");
+		printf("\t-d: stampa a video i risultati, default 0 - false\n");
+		exit(0);
+	}
+
+	//
+	// Legge i valori dei parametri da riga comandi
+	//
+
+	int par = 1;
+	while (par < argc) {
+		if (strcmp(argv[par],"-s") == 0) {
+			input->silent = 1;
+			par++;
+		} else if (strcmp(argv[par],"-d") == 0) {
+			input->display = 1;
+			par++;
+		} else if (strcmp(argv[par],"-ds") == 0) {
+			par++;
+			if (par >= argc) {
+				printf("Missing dataset file name!\n");
+				exit(1);
+			}
+			dsfilename = argv[par];
+			par++;
+		} else if (strcmp(argv[par],"-labels") == 0) {
+			par++;
+			if (par >= argc) {
+				printf("Missing labels file name!\n");
+				exit(1);
+			}
+			labelsfilename = argv[par];
+			par++;
+		} else if (strcmp(argv[par],"-k") == 0) {
+			par++;
+			if (par >= argc) {
+				printf("Missing k value!\n");
+				exit(1);
+			}
+			input->k = atoi(argv[par]);
+			par++;
+		} else{
+			printf("WARNING: unrecognized parameter '%s'!\n",argv[par]);
+			par++;
+		}
+	}
+
+	//
+	// Legge i dati e verifica la correttezza dei parametri
+	//
+
+	if(dsfilename == NULL || strlen(dsfilename) == 0){
+		printf("Missing ds file name!\n");
+		exit(1);
+	}
+
+	if(labelsfilename == NULL || strlen(labelsfilename) == 0){
+		printf("Missing labels file name!\n");
+		exit(1);
+	}
+
+
+
+	input->ds = load_data(dsfilename, &input->N, &input->d);
+
+	int nl, dl;
+	input->labels = load_data(labelsfilename, &nl, &dl);
+
+	if(nl != input->N || dl != 1){
+		printf("Invalid size of labels file, should be %ix1!\n", input->N);
+		exit(1);
+	}
+
+	if(input->k <= 0){
+		printf("Invalid value of k parameter!\n");
+		exit(1);
+	}
+
+	input->out = alloc_int_matrix(input->k, 1);
+
+	//
+	// Visualizza il valore dei parametri
+	//
+
+	if(!input->silent){
+		printf("Dataset file name: '%s'\n", dsfilename);
+		printf("Labels file name: '%s'\n", labelsfilename);
+		printf("Dataset row number: %d\n", input->N);
+		printf("Dataset column number: %d\n", input->d);
+		printf("Number of features to extract: %d\n", input->k);
+    }
+
+	// TODO COMMENTARE QUESTA RIGA!
+	//prova(input);
+	//
+
+	//
+	// Correlation Features Selection
+	//
+
+
+    //type f=calcola_media(input, 0);
+    //printf("La media è: %f\n",f);
+
+    //type e = deviazione_standard_c(input,46);
+    //printf("La deviazione standard è: %f\n", e);
+
+    //type g = media_valori_0_f(input, 3);
+    //printf("La media dei valori 0 è: %f\n", g);
+
+    //type h = media_valori_1_f(input, 3);
+    //printf("La media dei valori 1 è: %f\n", h);
+
+    //type rcc = calcola_rcf(input, 3);
+        //printf("L'rcf è: %f\n",rcc);
+    //type rff = calcola_rff(input, 2, 3);
+
+
+
+    t = clock();
+	cfs(input);
+	t = clock() - t;
+	time = ((float)t)/CLOCKS_PER_SEC;
+
+	if(!input->silent)
+		printf("CFS time = %.5f secs\n", time);
+	else
+		printf("%.3f\n", time);
+
+	//
+	// Salva il risultato
+	//
+	sprintf(fname, "out32_%d_%d_%d.ds2", input->N, input->d, input->k);
+	save_out(fname, input->sc, input->out, input->k);
+	if(input->display){
+		if(input->out == NULL)
+			printf("out: NULL\n");
+		else{
+			int i,j;
+			printf("sc: %f, out: [", input->sc);
+			for(i=0; i<input->k; i++){
+				printf("%i,", input->out[i]);
+			}
+			printf("]\n");
+		}
+	}
+
+	if(!input->silent)
+		printf("\nDone.\n");
+
+	dealloc_matrix(input->ds);
+	dealloc_matrix(input->labels);
+	dealloc_matrix(input->out);
+	free(input);
+
+	return 0;
+}
