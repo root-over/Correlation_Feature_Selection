@@ -233,6 +233,7 @@ void save_out(char* filename, type sc, int* X, int k) {
 
 extern void prova(params* input);
 
+//TODO provare ad ottimizzare
 type media_valori_0_f(params* input, int f){
     type somma=0;
     int contatore=0;
@@ -322,14 +323,7 @@ type deviazione_standard_c(params* input, int f){
     return sqrt((1.0/((input->N)-1)*somma));
 }
 
-type calcola_rcf(params* input, int f){
-    //printf("______________________________________\n");
-    int n1= conta_elementi_1(input);
-    //printf("Elementi 1: %d\n",n1);
-    int n0= input->N-n1;
-    //printf("Elementi 0: %d\n",n0);
-
-
+type calcola_rcf(params* input, int f, int n0, int n1){
 
     type mu0=media_valori_0_f(input,f);
     //printf("Media valori 0: %f\n",mu0);
@@ -348,25 +342,32 @@ type calcola_rcf(params* input, int f){
 
 }
 
-void calcola_max_rcf(params* input){
+type* calcola_max_rcf(params* input){
     int f_rcf_max=0;
     type rcf_max=0;
+    type* rcf = (type*)malloc(input->d * sizeof(type));
+
+    int n1= conta_elementi_1(input);
+    int n0= input->N-n1;
+
     for (int i = 0; i < input->d; i++) {
-        type rcf=calcola_rcf(input,i);
+        type rcf_attuale=calcola_rcf(input,i,n0,n1);
         //printf("L'rcf della feature %d é %f\n",i,rcf);
-        if (rcf>rcf_max){
+        rcf[i]=rcf_attuale;
+        if (rcf_attuale>rcf_max){
             f_rcf_max=i;
-            rcf_max=rcf;
+            rcf_max=rcf_attuale;
         }
     }
     input->out[0]=f_rcf_max;
     input->dim=1;
     //printf("La feature con rcf massimo è la %d con rcf pari a %f",f_rcf_max,rcf_max);
+    return rcf;
 }
 
-type calcola_rff(params* input, int fx, int fy){
-    type mux = calcola_media(input,fx);
-    type muy= calcola_media(input,fy);
+type calcola_rff(params* input, int fx, int fy, const type media_elem[]){
+    type mux = media_elem[fx];
+    type muy= media_elem[fy];
     type sommatoria1=0;
     type sommatoria2=0;
     type sommatoria3=0;
@@ -396,18 +397,17 @@ type calcola_rff(params* input, int fx, int fy){
 }
 
 //È GIUSTO PERÒ CÈ UN FIXME
-type calcola_merit(params* input, int f){
-    type rcf= calcola_rcf(input, f);
+type calcola_merit(params* input, int f, type media_elem[], type* rcf){
     //printf("Rcf: %f\n",rcf);
     type rff_tot=0;
     //TODO in rff devo passare la feature passata e confrontarla con tutte le altre feature in input->out
     for (int i = 0; i < input->dim; i++) {
         printf("Sto per passare fx: %d, fy:%d\n",f,i);
-        rff_tot+= calcola_rff(input,f,i); //FIN qui è giusto
+        rff_tot+= calcola_rff(input,f,i,media_elem); //FIN qui è giusto
         printf("rff tot: %f\n", rff_tot);
     }
     //printf("Merit ritornato: %f\n",input->k* abs(rcf))/(sqrt(input->k+(input->k*(input->k-1)* abs(rff_tot+input->rff_totale))));
-    return (input->k* fabs(rcf))/(sqrt(input->k+(input->k*(input->k-1)* fabs(rff_tot+input->rff_totale))));
+    return (input->k* fabs(rcf[f]))/(sqrt(input->k+(input->k*(input->k-1)* fabs(rff_tot+input->rff_totale))));
 }
 
 int checkout(params * input, int f_merit_attuale){
@@ -420,7 +420,7 @@ int checkout(params * input, int f_merit_attuale){
 }
 
 
-void cfs(params* input){
+void cfs(params* input, type media_elem[]){
     //TODO devo restituire il merit migliore, nonchè tutte le k feature che hanno il miglior merit,
     // per fare ciò si posono mettere tutti i merit in un array e selezionare solo i migliori k
 	// ------------------------------------------------------------
@@ -431,13 +431,13 @@ void cfs(params* input){
     type merit_massimissimo=0;
     int f_merit_massimissimo=0;
     int f_merit_max=0;
+    type* rcf;
 
-    input->out[0]=0;
-    calcola_max_rcf(input);
+    rcf=calcola_max_rcf(input);
 
     while(input->dim<input->k){
         for(int i=0; i<input->d; i++){ //per ogni feature f (in questo caso d)
-            merit_attuale = calcola_merit(input,i); //passo la feature i-esima
+            merit_attuale = calcola_merit(input,i,media_elem,rcf); //passo la feature i-esima
             printf("Merit di %d: %f\n",i,merit_attuale);
             //TODO dopo aver ottenuto il merit capire come non ricalcolare più volte lo stesso merit
             if ((merit_attuale>merit_max) & (checkout(input,i)==0)){
@@ -595,9 +595,13 @@ int main(int argc, char** argv) {
 	//
 	// Correlation Features Selection
 	//
+    type media_elem[input->d]; //Media degli elementi di ogni feature
+    for (int i=0; i<input->d; i++){
+        media_elem[i]=calcola_media(input,i);
+    }
 
     t = clock();
-	cfs(input);
+	cfs(input,media_elem);
 	t = clock() - t;
 	time = ((float)t)/CLOCKS_PER_SEC;
 
