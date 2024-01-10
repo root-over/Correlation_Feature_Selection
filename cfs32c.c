@@ -44,7 +44,6 @@
 #include <math.h>
 #include <string.h>
 #include <time.h>
-#include <libgen.h>
 #include <xmmintrin.h>
 
 #define	type		float
@@ -55,6 +54,8 @@ typedef struct {
 	MATRIX ds; 		// dataset
 	VECTOR labels; 	// etichette
 	int* out;		// vettore contenente risultato dim=k
+    int dim;        // Valori inseriti all'interno di out
+    type rff_totale;// L'rff totale calcolato
 	type sc;		// score dell'insieme di features risultato
 	int k;			// numero di features da estrarre
 	int N;			// numero di righe del dataset
@@ -341,13 +342,29 @@ type calcola_rcf(params* input, int f){
     type sf= deviazione_standard_c(input,f);
     //printf("Deviazione standard: %f\n",sf);
 
-    printf("RCF: %f\n",((mu0-mu1)/sf)* sqrt((n0*n1)/ pow(n,2)));
+    printf("RCF di %d: %f\n",f,((mu0-mu1)/sf)* sqrt((n0*n1)/ pow(n,2)));
 
     return ((mu0-mu1)/sf)* sqrt((n0*n1)/ pow(n,2)); //Rcf
 
 }
 
-type calcola_rff(params* input, int fx, int fy, int cont){
+void calcola_max_rcf(params* input){
+    int f_rcf_max=0;
+    type rcf_max=0;
+    for (int i = 0; i < input->d; i++) {
+        type rcf=calcola_rcf(input,i);
+        //printf("L'rcf della feature %d é %f\n",i,rcf);
+        if (rcf>rcf_max){
+            f_rcf_max=i;
+            rcf_max=rcf;
+        }
+    }
+    input->out[0]=f_rcf_max;
+    input->dim=1;
+    //printf("La feature con rcf massimo è la %d con rcf pari a %f",f_rcf_max,rcf_max);
+}
+
+type calcola_rff(params* input, int fx, int fy){
     type mux = calcola_media(input,fx);
     type muy= calcola_media(input,fy);
     type sommatoria1=0;
@@ -374,19 +391,34 @@ type calcola_rff(params* input, int fx, int fy, int cont){
             sommatoria3+=(pow(input->ds[i]-muy,2));
         }
     }
-    printf("RFF n %d: %f\n",cont,sommatoria1/(sqrt(sommatoria2)* sqrt(sommatoria3)));
+    //printf("RFF n %d: %f\n",fx,sommatoria1/(sqrt(sommatoria2)* sqrt(sommatoria3)));
     return sommatoria1/(sqrt(sommatoria2)* sqrt(sommatoria3));
 }
 
 //È GIUSTO PERÒ CÈ UN FIXME
 type calcola_merit(params* input, int f){
     type rcf= calcola_rcf(input, f);
+    //printf("Rcf: %f\n",rcf);
+    type rff_tot=0;
     //TODO in rff devo passare la feature passata e confrontarla con tutte le altre feature in input->out
-    type rff= calcola_rff(input,f,3,0);
-    return (input->k* abs(rcf))/(sqrt(input->k+(input->k*(input->k-1)* abs(rff))));
-    //FIXME rcf e rff non sono periodici, lo devono essere(forse)
-
+    for (int i = 0; i < input->dim; i++) {
+        printf("Sto per passare fx: %d, fy:%d\n",f,i);
+        rff_tot+= calcola_rff(input,f,i); //FIN qui è giusto
+        printf("rff tot: %f\n", rff_tot);
+    }
+    //printf("Merit ritornato: %f\n",input->k* abs(rcf))/(sqrt(input->k+(input->k*(input->k-1)* abs(rff_tot+input->rff_totale))));
+    return (input->k* fabs(rcf))/(sqrt(input->k+(input->k*(input->k-1)* fabs(rff_tot+input->rff_totale))));
 }
+
+int checkout(params * input, int f_merit_attuale){
+    for (int i=0; i<input->dim; i++){
+        if (input->out[i]==f_merit_attuale){
+            return 1;
+        }
+    }
+    return 0;
+}
+
 
 void cfs(params* input){
     //TODO devo restituire il merit migliore, nonchè tutte le k feature che hanno il miglior merit,
@@ -394,20 +426,41 @@ void cfs(params* input){
 	// ------------------------------------------------------------
 	// Codificare qui l'algoritmo di Correlation Features Selection
 	// ------------------------------------------------------------
-    type merit_attuale=0;
+    type merit_attuale;
     type merit_max=0;
+    type merit_massimissimo=0;
+    int f_merit_massimissimo=0;
+    int f_merit_max=0;
 
-    //input->out[0]=0;
-    int s_size=0;
-    while(s_size<=input->k){
-        for(int i=1; i<input->d; i++){ //per ogni feature f (in questo caso d)
+    input->out[0]=0;
+    calcola_max_rcf(input);
+
+    while(input->dim<input->k){
+        for(int i=0; i<input->d; i++){ //per ogni feature f (in questo caso d)
             merit_attuale = calcola_merit(input,i); //passo la feature i-esima
-            if (merit_attuale>merit_max){
+            printf("Merit di %d: %f\n",i,merit_attuale);
+            //TODO dopo aver ottenuto il merit capire come non ricalcolare più volte lo stesso merit
+            if ((merit_attuale>merit_max) & (checkout(input,i)==0)){
                 merit_max=merit_attuale;
+                f_merit_max=i;
+                if (merit_max>merit_massimissimo){
+                    merit_massimissimo=merit_max;
+                    f_merit_massimissimo=i;
+                }
             }
+            //printf("AAA Merit massimo è della feature %d, con valore %f\n",f_merit_max,merit_max);
+
+
         }
-        s_size++;
+        //printf("Mi trovo in posizione %d\n",input->dim);
+        //TODO fare il controllo se il merit appena trovato è maggiore di quelli dentro input->out
+        printf("Merit massimo attuale è della feature %d, con valore %f\n",f_merit_max,merit_max);
+        input->out[input->dim]=f_merit_max;
+        input->dim++;
+        merit_max=0;
+
     }
+    printf("Merit massimo è della feature %d, con valore %f\n",f_merit_massimissimo,merit_massimissimo);
 }
 
 int main(int argc, char** argv) {
@@ -542,25 +595,6 @@ int main(int argc, char** argv) {
 	//
 	// Correlation Features Selection
 	//
-
-
-    //type f=calcola_media(input, 0);
-    //printf("La media è: %f\n",f);
-
-    //type e = deviazione_standard_c(input,46);
-    //printf("La deviazione standard è: %f\n", e);
-
-    //type g = media_valori_0_f(input, 3);
-    //printf("La media dei valori 0 è: %f\n", g);
-
-    //type h = media_valori_1_f(input, 3);
-    //printf("La media dei valori 1 è: %f\n", h);
-
-    //type rcc = calcola_rcf(input, 3);
-        //printf("L'rcf è: %f\n",rcc);
-    //type rff = calcola_rff(input, 2, 3);
-
-
 
     t = clock();
 	cfs(input);
