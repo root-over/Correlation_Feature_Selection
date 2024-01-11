@@ -46,23 +46,23 @@
 #include <time.h>
 #include <xmmintrin.h>
 
-#define	type		float
-#define	MATRIX		type*
-#define	VECTOR		type*
+#define    type        float
+#define    MATRIX        type*
+#define    VECTOR        type*
 
 typedef struct {
-	MATRIX ds; 		// dataset
-	VECTOR labels; 	// etichette
-	int* out;		// vettore contenente risultato dim=k
+    MATRIX ds;        // dataset
+    VECTOR labels;    // etichette
+    int *out;        // vettore contenente risultato dim=k
     int dim;        // Valori inseriti all'interno di out
     type rff_totale;// L'rff totale calcolato
-    type*rff;       // Vettore contenente gli rff di ogni feature
-	type sc;		// score dell'insieme di features risultato
-	int k;			// numero di features da estrarre
-	int N;			// numero di righe del dataset
-	int d;			// numero di colonne/feature del dataset
-	int display;
-	int silent;
+    type *rff;       // Vettore contenente gli rff di ogni feature
+    type sc;        // score dell'insieme di features risultato
+    int k;            // numero di features da estrarre
+    int N;            // numero di righe del dataset
+    int d;            // numero di colonne/feature del dataset
+    int display;
+    int silent;
 } params;
 
 /*
@@ -79,30 +79,30 @@ typedef struct {
 */
 
 //riserva un blocco di memoria
-void* get_block(int size, int elements) {
-	return _mm_malloc(elements*size,16);
+void *get_block(int size, int elements) {
+    return _mm_malloc(elements * size, 16);
     //è generalmente utilizzata per allocare memoria allineata
     //in modo specifico per migliorare le prestazioni delle istruzioni SIMD.
 }
 
 //libera il blocco di memoria
-void free_block(void* p) { 
-	_mm_free(p);
+void free_block(void *p) {
+    _mm_free(p);
 }
 
 //Alloca una matrice di float* (MATRIX)
 MATRIX alloc_matrix(int rows, int cols) {
-	return (MATRIX) get_block(sizeof(type),rows*cols);
+    return (MATRIX) get_block(sizeof(type), rows * cols);
 }
 
 //Alloca una matrice di int*
-int* alloc_int_matrix(int rows, int cols) {
-	return (int*) get_block(sizeof(int),rows*cols);
+int *alloc_int_matrix(int rows, int cols) {
+    return (int *) get_block(sizeof(int), rows * cols);
 }
 
 //Dealloca le matrici
-void dealloc_matrix(void* mat) {
-	free_block(mat);
+void dealloc_matrix(void *mat) {
+    free_block(mat);
 }
 
 /*
@@ -124,39 +124,39 @@ void dealloc_matrix(void* mat) {
 *****************************************************************************
 * 
 */
-MATRIX load_data(char* filename, int *n, int *k) {
-	FILE* fp;
-	int rows, cols;
-	
-	fp = fopen(filename, "rb"); //apre il file in lettura binaria
-	
-	if (fp == NULL){
-		printf("'%s': nome del file errato!\n", filename);
-		exit(0);
-	}
+MATRIX load_data(char *filename, int *n, int *k) {
+    FILE *fp;
+    int rows, cols;
+
+    fp = fopen(filename, "rb"); //apre il file in lettura binaria
+
+    if (fp == NULL) {
+        printf("'%s': nome del file errato!\n", filename);
+        exit(0);
+    }
 
 
     //leggono rispettivamente la dimensione della riga e della colonna della matrice mettendoli nelle apposite variabili
-	fread(&cols, sizeof(int), 1, fp);
+    fread(&cols, sizeof(int), 1, fp);
     //ptr: puntatore al blocco di memoria in cui verranno memorizzati i dati
     //size: dimensione in byte dei dati
     //n: numero di elementi da leggere
     //stream: puntatore al file da cui leggere i dati
 
-	fread(&rows, sizeof(int), 1, fp);
+    fread(&rows, sizeof(int), 1, fp);
 
     //alloca la matrice "data" con dimensione rows e cols
-	MATRIX data = alloc_matrix(rows,cols);
+    MATRIX data = alloc_matrix(rows, cols);
 
     //popola la matrice con gli elementi all'interno del file
-	fread(data, sizeof(type), rows * cols, fp);
-	fclose(fp);
+    fread(data, sizeof(type), rows * cols, fp);
+    fclose(fp);
 
     //assegna ai valori puntati da n e k il numero di righe e il numero di colonne
-	*n = rows;
-	*k = cols;
-	
-	return data;
+    *n = rows;
+    *k = cols;
+
+    return data;
 }
 
 /*
@@ -171,33 +171,33 @@ MATRIX load_data(char* filename, int *n, int *k) {
 * 	successivi 4 byte: numero di colonne (M) --> numero intero a 32 bit
 * 	successivi N*M*4 byte: matrix data in row-major order --> numeri interi o floating-point a precisione singola
 */
-void save_data(char* filename, void* X, int n, int k) {
+void save_data(char *filename, void *X, int n, int k) {
 
     //X rappresenta la matrice di dati linearizzata (return della funzione load_data)
 
-	FILE* fp;
-	int i;
-	fp = fopen(filename, "wb"); //apre il file in lettura binaria
+    FILE *fp;
+    int i;
+    fp = fopen(filename, "wb"); //apre il file in lettura binaria
     //Se in X è presente qualcosa imposta le dimensioni della matrice nel file
-	if(X != NULL){
+    if (X != NULL) {
         //k righe, n colonne
-		fwrite(&k, 4, 1, fp);
-		fwrite(&n, 4, 1, fp);
+        fwrite(&k, 4, 1, fp);
+        fwrite(&n, 4, 1, fp);
         //copia gli elementi di X nel file
-		for (i = 0; i < n; i++) {
-			fwrite(X, sizeof(type), k, fp);
+        for (i = 0; i < n; i++) {
+            fwrite(X, sizeof(type), k, fp);
             //printf("%i %i\n", ((int*)X)[0], ((int*)X)[1]);
             //sposta il puntatore di X alla colonna successiva della matrice
-			X += sizeof(type)*k;
-		}
-	}
-    //Altrimenti imposta nel file la matice a dimensione 0
-	else{
-		int x = 0;
-		fwrite(&x, 4, 1, fp);
-		fwrite(&x, 4, 1, fp);
-	}
-	fclose(fp);
+            X += sizeof(type) * k;
+        }
+    }
+        //Altrimenti imposta nel file la matice a dimensione 0
+    else {
+        int x = 0;
+        fwrite(&x, 4, 1, fp);
+        fwrite(&x, 4, 1, fp);
+    }
+    fclose(fp);
 }
 
 /*
@@ -211,69 +211,69 @@ void save_data(char* filename, void* X, int n, int k) {
 * 	successivi 4 byte: numero di elementi (k+1) --> numero intero a 32 bit
 * 	successivi byte: elementi del vettore 		--> 1 numero floating-point a precisione singola e k interi
 */
-void save_out(char* filename, type sc, int* X, int k) {
-	FILE* fp;
+void save_out(char *filename, type sc, int *X, int k) {
+    FILE *fp;
     int n = 1;
-	k++;
-	fp = fopen(filename, "wb");
-	if(X != NULL){
+    k++;
+    fp = fopen(filename, "wb");
+    if (X != NULL) {
         //imposta dimensione righe e colonne della matrice linearizzata
-		fwrite(&n, 4, 1, fp);
-		fwrite(&k, 4, 1, fp);
+        fwrite(&n, 4, 1, fp);
+        fwrite(&k, 4, 1, fp);
         //scrive lo score dell'insieme di feature
-		fwrite(&sc, sizeof(type), 1, fp);
+        fwrite(&sc, sizeof(type), 1, fp);
         //svrive i dati della matrice linearizzata
-		fwrite(X, sizeof(int), k, fp);
+        fwrite(X, sizeof(int), k, fp);
         //printf("%i %i\n", ((int*)X)[0], ((int*)X)[1]);
-	}
-	fclose(fp);
+    }
+    fclose(fp);
 }
 
 // PROCEDURE ASSEMBLY
 
-extern void prova(params* input);
+extern void prova(params *input);
 
-type media_valori_0_f(const type* ds, const type* labels, int N, int d, int f){
-    type somma=0;
-    int contatore=0;
-    int cont=0;
+type media_valori_0_f(const type *ds, const type *labels, int N, int d, int f) {
+    type somma = 0;
+    int contatore = 0;
+    int cont = 0;
 
-    for (int i=f; i<N*d; i+=d){
+    for (int i = f; i < N * d; i += d) {
         //printf("%d",(int)input->labels[i%input->N]);
         cont++;
         //printf("i=%d | j=%d,",i,i/input->d);
-        if (labels[i/d]==0){//Magaria per scorrere il vettore label attraverso l'indice del for
+        if (labels[i / d] == 0) {//Magaria per scorrere il vettore label attraverso l'indice del for
             //printf("%f,",input->ds[i]);
             //printf("%f,",input->labels[(i%input->N)/input->d]);
-            somma=somma+ds[i];
+            somma = somma + ds[i];
             contatore++;
         }
     }
     //printf("contatore di 0: %d\n",contatore);
     //printf("Iterazioni totali: %d", cont);
-    return somma/(type)contatore;
+    return somma / (type) contatore;
 }
-type media_valori_1_f(const type* ds, const type* labels, int N, int d, int f){
-    type somma=0;
-    int contatore=0;
-    int cont=0;
 
-    for (int i=f; i<N*d; i+=d){
+type media_valori_1_f(const type *ds, const type *labels, int N, int d, int f) {
+    type somma = 0;
+    int contatore = 0;
+    int cont = 0;
+
+    for (int i = f; i < N * d; i += d) {
         cont++;
-        if (labels[i/d]==1){
-            somma=somma+ds[i];
+        if (labels[i / d] == 1) {
+            somma = somma + ds[i];
             contatore++;
         }
     }
-    return somma/(type)contatore;
+    return somma / (type) contatore;
 }
 
 //GIUSTISSIMO
-int conta_elementi_1(const type* labels, int N){
-    int contatore=0;
+int conta_elementi_1(const type *labels, int N) {
+    int contatore = 0;
     for (int i = 0; i < (N); i++) {
-        //printf("%d",(int)input->labels[i]);
-        if (labels[i]==0){
+        if (labels[i] == 0) {
             contatore++;
         }
     }
@@ -281,20 +281,16 @@ int conta_elementi_1(const type* labels, int N){
 }
 
 //GIUSTO
-type calcola_media(const type* ds, int N, int d, int f){
-    type somma=0;
-    for (int i=f; i<N*d; i+=d){
-        //printf("%f,",input->ds[i]);
-        somma+=ds[i];
+type calcola_media(const type *ds, int N, int d, int f) {
+    type somma = 0;
+    for (int i = f; i < N * d; i += d) {
+        somma += ds[i];
     }
-    //printf("Ho contato %d elementi della feature %f\n",contatore,input->ds[f]);
-    //TODO non so se ha senso mettere N-1
-    return somma/(type)(N);
+    return somma / (type) (N);
 }
 
 //GIUSTO
-type deviazione_standard_c(const type* ds, int N, int d, int f){
-    //printf("Il primo valore è %f\n", input->ds[0]);
+type deviazione_standard_c(const type *ds, int N, int d, int f) {
     type media = calcola_media(ds, N, d, f);
     type somma_quadrati_diff = 0;
 
@@ -302,351 +298,339 @@ type deviazione_standard_c(const type* ds, int N, int d, int f){
         type diff = ds[i] - media;
         somma_quadrati_diff += diff * diff;
     }
-
-    return sqrtf(somma_quadrati_diff / (float)(N));
+    return sqrtf(somma_quadrati_diff / (float) (N));
 }
 
 //GIUSTO
-type calcola_rcf(const type* ds, const type* labels, int N, int d, int f, int n0, int n1){
-    type mu0=media_valori_0_f(ds,labels,N,d,f);
-    //printf("Media valori 0: %f\n",mu0);
-    type mu1=media_valori_1_f(ds,labels,N,d,f);
-    //printf("Media valori 1: %f\n",mu1);
+type calcola_rcf(const type *ds, const type *labels, int N, int d, int f, int n0, int n1) {
+    type mu0 = media_valori_0_f(ds, labels, N, d, f);
+    type mu1 = media_valori_1_f(ds, labels, N, d, f);
 
-    int n= n0+n1;
-    //printf("Totale elementi: %d\n",n);
+    int n = n0 + n1;
+    type sf = deviazione_standard_c(ds, N, d, f);
 
-    type sf= deviazione_standard_c(ds,N,d,f);
-    //printf("Deviazione standard: %f\n",sf);
-
-    //printf("RCF di %d: %f\n",f,((mu0-mu1)/sf)* sqrt((n0*n1)/ pow(n,2)));
-
-    return (type)(((mu0-mu1)/sf)* sqrt((n0*n1)/ pow(n,2))); //Rcf
-
+    return (type) (((mu0 - mu1) / sf) * sqrt((n0 * n1) / pow(n, 2))); //Rcf
 }
 
 //GIUSTO
-type* calcola_max_rcf(params* input, const type* ds, int d, int N){
-    int f_rcf_max=0;
-    type rcf_max=0;
-    type* label=input->labels;
+type *calcola_max_rcf(params *input, const type *ds, int d, int N) {
+    int f_rcf_max = 0;
+    type rcf_max = 0;
+    type *label = input->labels;
 
-    type* rcf = (type*)malloc(d * sizeof(type));
+    type *rcf = (type *) malloc(d * sizeof(type));
 
-    int n1= conta_elementi_1(label,N);
-    int n0= N-n1;
+    int n1 = conta_elementi_1(label, N);
+    int n0 = N - n1;
 
     for (int i = 0; i < d; i++) {
-        type rcf_attuale=calcola_rcf(ds,label,N,d,i,n0,n1);
-        //printf("L'rcf della feature %d é %f\n",i,rcf_attuale);
-        rcf[i]=rcf_attuale;
-        if (rcf_attuale>rcf_max){
-            f_rcf_max=i;
-            rcf_max=rcf_attuale;
+        type rcf_attuale = calcola_rcf(ds, label, N, d, i, n0, n1);
+        rcf[i] = rcf_attuale;
+        if (rcf_attuale > rcf_max) {
+            f_rcf_max = i;
+            rcf_max = rcf_attuale;
         }
     }
-    input->out[0]=f_rcf_max;
-    input->dim=1;
+    input->out[0] = f_rcf_max;
+    input->dim = 1;
     //printf("La feature con rcf massimo è la %d con rcf pari a %f",f_rcf_max,rcf_max);
     return rcf;
 }
 
 //GIUSTO
-type calcola_rff(const type* ds, int N, int d, int fx, int fy, const type media_elem[]){
+type calcola_rff(const type *ds, int N, int d, int fx, int pos_fy, const type media_elem[], const int *out) {
+    int fy = out[pos_fy];
     type mux = media_elem[fx];
-    type muy= media_elem[fy];
-    type sommatoria1=0;
-    type sommatoria2=0;
-    type sommatoria3=0;
+    type muy = media_elem[fy];
+    type sommatoria1 = 0;
+    type sommatoria2 = 0;
+    type sommatoria3 = 0;
     int f_max;
     int gap;
 
-    if (fx>fy){
-        f_max=fx;
-        gap=fx-fy;
-        for(int i=f_max; i<N*d; i+=d) {
-            type operazione1=ds[i]-mux;
-            type operazione2=ds[i-gap]-muy;
-            //printf("%f,",input->ds[i-gap]);
-            sommatoria1+=((operazione1)*(operazione2));
-            sommatoria2+=((operazione1)*(operazione1));
-            sommatoria3+=((operazione2)*(operazione2));
+    if (fx > fy) {
+        f_max = fx;
+        gap = fx - fy;
+        for (int i = f_max; i < N * d; i += d) {
+            type operazione1 = ds[i] - mux;
+            type operazione2 = ds[i - gap] - muy;
+            sommatoria1 += ((operazione1) * (operazione2));
+            sommatoria2 += ((operazione1) * (operazione1));
+            sommatoria3 += ((operazione2) * (operazione2));
         }
-    } else{
-        f_max=fy;
-        gap=fy-fx;
-        for(int i=f_max; i<N*d; i+=d) {
-            type operazione1=ds[i-gap]-mux;
-            type operazione2=ds[i]-muy;
-            sommatoria1+=((operazione1)*(operazione2));
-            sommatoria2+=((operazione1)*(operazione1));
-            sommatoria3+=((operazione2)*(operazione2));
+    } else {
+        f_max = fy;
+        gap = fy - fx;
+        for (int i = f_max; i < N * d; i += d) {
+            type operazione1 = ds[i - gap] - mux;
+            type operazione2 = ds[i] - muy;
+            sommatoria1 += ((operazione1) * (operazione2));
+            sommatoria2 += ((operazione1) * (operazione1));
+            sommatoria3 += ((operazione2) * (operazione2));
         }
     }
 
-    //printf("RFF tra fx %d e fy %d: %f\n",fx,fy,sommatoria1/(sqrtf(sommatoria2)* sqrtf(sommatoria3)));
-    return (type)(sommatoria1/(sqrtf(sommatoria2)* sqrtf(sommatoria3)));
+    //printf("RFF tra fx %d e fy %d: %f ",fx,fy,sommatoria1/(sqrtf(sommatoria2)* sqrtf(sommatoria3)));
+    return (type) (sommatoria1 / (sqrtf(sommatoria2) * sqrtf(sommatoria3)));
 }
 
+type media_rcf(params *input, const type *rcf) {
+    type rcf_tot = 0;
+    for (int i = 0; i < input->dim; i++) {
+        rcf_tot += rcf[input->out[i]];
+        printf("L'rcf di %d è %f\n", input->out[i], rcf[input->out[i]]);
+    }
+    printf("ritorno la media %f\n", rcf_tot / (type) input->dim);
+    return rcf_tot;
+}
 
-type calcola_merit(params* input,const type* ds, int N, int d, int k, int f, type media_elem[], type* rcf){
+type calcola_merit(params *input, const type *ds, int N, int d, int k, int f, type media_elem[], type *rcf, int *out,
+                   type rff_totale, int dim) {
     //printf("Rcf: %f\n",rcf);
-    type rff_tot=0;
-    int dim= input->dim;
+    type rff_tot = 0;
 
     for (int i = 0; i < dim; i++) {
         if (f != i) {
-            //printf("Sto per passare fx: %d, fy:%d\n",f,i);
-            rff_tot += calcola_rff(ds, N, d, f, i, media_elem); //FIN qui è giusto
-            //printf("rff tot: %f\n", rff_tot);
+            rff_tot += calcola_rff(ds, N, d, f, i, media_elem, out);
+            //printf(" Totale tra %d e %d è: %f\n",f,input->out[i],rff_tot);
         }
     }
-    input->rff[f]=rff_tot;
-    //FIXME Il valore medio di rcf e rff?
+    //type rff_totale=input->rff_totale;
+    input->rff[f] = rff_tot;
+    //FIXME Il valore medio di rcf e rff
     //printf("Merit ritornato: %f\n",input->k* abs(rcf))/(sqrt(input->k+(input->k*(input->k-1)* abs(rff_tot+input->rff_totale))));
-    return (type)(((type)k* fabsf(rcf[f]))/(sqrtf((type)k+((type)k*((type)k-1)* fabsf(rff_tot+input->rff_totale)))));
+    return (type) (((type) k * fabsf((rcf[f])) / (sqrtf((type) k + ((type) k * ((type) k - 1) *
+                                                                    fabsf((rff_tot + rff_totale) /
+                                                                          (type) (dim + 1)))))));
 }
 
-int checkout(params * input, int f_merit_attuale){
-    int dim=input->dim;
-
-    for (int i=0; i<dim; i++){
-        if (input->out[i]==f_merit_attuale){
-            return 1;
-        }
-    }
-    return 0;
-}
-
-
-void cfs(params* input, type media_elem[]){
-	// ------------------------------------------------------------
-	// Codificare qui l'algoritmo di Correlation Features Selection
-	// ------------------------------------------------------------
+void cfs(params *input, type media_elem[]) {
+    // ------------------------------------------------------------
+    // Codificare qui l'algoritmo di Correlation Features Selection
+    // ------------------------------------------------------------
     type merit_attuale;
-    type merit_max=0;
-    type merit_massimissimo=0;
-    int f_merit_massimissimo=0;
-    int f_merit_max=0;
-    type* rcf;
+    type merit_max = 0;
+    type merit_massimissimo = 0;
+    //int f_merit_massimissimo;
+    int f_merit_max = 0;
+    type *rcf;
 
     int d = input->d;
-    int k= input->k;
-    type*ds = input->ds;
+    int k = input->k;
+    type *ds = input->ds;
     int N = input->N;
 
+    input->rff = (type *) malloc((d) * sizeof(type));
 
-    input->rff = (type*)malloc((d) * sizeof(type));
+    rcf = calcola_max_rcf(input, ds, d, N);
 
-
-    rcf=calcola_max_rcf(input,ds,d,N);
-
-    while(input->dim<k){
-        for(int i=0; i<d; i++){ //per ogni feature f (in questo caso d)
-            merit_attuale = calcola_merit(input,ds,N,d,k,i,media_elem,rcf); //passo la feature i-esima
+    while (input->dim < k) {
+        int dim = input->dim;
+        int *out = input->out;
+        type rff_totale = input->rff_totale;
+        for (int i = 0; i < d; i++) { //per ogni feature f (in questo caso d)
+            merit_attuale = calcola_merit(input, ds, N, d, k, i, media_elem, rcf, out, rff_totale,
+                                          dim); //passo la feature i-esima
             //printf("Merit di %d: %f\n",i,merit_attuale);
-            if ((merit_attuale>merit_max) & (checkout(input,i)==0)){
-                merit_max=merit_attuale;
-                f_merit_max=i;
-                if (merit_max>merit_massimissimo){
-                    merit_massimissimo=merit_max;
-                    f_merit_massimissimo=i;
+            if (merit_attuale > merit_max) {
+                merit_max = merit_attuale;
+                f_merit_max = i;
+                if (merit_max > merit_massimissimo) {
+                    merit_massimissimo = merit_max;
                 }
             }
-            //printf("AAA Merit massimo è della feature %d, con valore %f\n",f_merit_max,merit_max);
         }
-        printf("Rff del merit massimo %d è %f\n",f_merit_max,input->rff[f_merit_max]);
+        //printf("Rff del merit massimo %d è %f\n",f_merit_max,input->rff[f_merit_max]);
         //for (int i = 0; i < input->dim; i++) {
         //    input->rff_totale += calcola_rff(input, f_merit_max, i, media_elem);
         //}
-        input->rff_totale+=input->rff[f_merit_max];
+        input->rff_totale += input->rff[f_merit_max];
 
-        printf("Rff_totale: %f:\n",input->rff_totale);
+        //printf("Rff_totale: %f:\n",input->rff_totale);
         //printf("Mi trovo in posizione %d\n",input->dim);
         //printf("Merit massimo attuale è della feature %d, con valore %f\n",f_merit_max,merit_max);
-        input->out[input->dim]=f_merit_max;
+        input->out[input->dim] = f_merit_max;
         input->dim++;
-        merit_max=0;
-
+        merit_max = 0;
     }
-    printf("Merit massimo è della feature %d, con valore %f\n",f_merit_massimissimo,merit_massimissimo);
+    input->sc = merit_massimissimo;
+    //printf("Merit massimo è della feature %d, con valore %f\n",f_merit_massimissimo,merit_massimissimo);
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
 
-	char fname[256];
-	char* dsfilename = NULL;
-	char* labelsfilename = NULL;
-	clock_t t;
-	float time;
+    char fname[256];
+    char *dsfilename = NULL;
+    char *labelsfilename = NULL;
+    clock_t t;
+    float time;
 
-	//
-	// Imposta i valori di default dei parametri
-	//
+    //
+    // Imposta i valori di default dei parametri
+    //
 
-	params* input = malloc(sizeof(params));
+    params *input = malloc(sizeof(params));
 
-	input->ds = NULL;
-	input->labels = NULL;
-	input->k = -1;
-	input->sc = -1;
+    input->ds = NULL;
+    input->labels = NULL;
+    input->k = -1;
+    input->sc = -1;
 
-	input->silent = 0;
-	input->display = 0;
+    input->silent = 0;
+    input->display = 0;
 
-	//
-	// Visualizza la sintassi del passaggio dei parametri da riga di comando
-	//
+    //
+    // Visualizza la sintassi del passaggio dei parametri da riga di comando
+    //
 
-	if(argc <= 1){
-		printf("%s -ds <DS> -labels <LABELS> -k <K> [-s] [-d]\n", argv[0]);
-		printf("\nParameters:\n");
-		printf("\tDS: il nome del file ds2 contenente il dataset\n");
-		printf("\tLABELS: il nome del file ds2 contenente le etichette\n");
-		printf("\tk: numero di features da estrarre\n");
-		printf("\nOptions:\n");
-		printf("\t-s: modo silenzioso, nessuna stampa, default 0 - false\n");
-		printf("\t-d: stampa a video i risultati, default 0 - false\n");
-		exit(0);
-	}
-
-	//
-	// Legge i valori dei parametri da riga comandi
-	//
-
-	int par = 1;
-	while (par < argc) {
-		if (strcmp(argv[par],"-s") == 0) {
-			input->silent = 1;
-			par++;
-		} else if (strcmp(argv[par],"-d") == 0) {
-			input->display = 1;
-			par++;
-		} else if (strcmp(argv[par],"-ds") == 0) {
-			par++;
-			if (par >= argc) {
-				printf("Missing dataset file name!\n");
-				exit(1);
-			}
-			dsfilename = argv[par];
-			par++;
-		} else if (strcmp(argv[par],"-labels") == 0) {
-			par++;
-			if (par >= argc) {
-				printf("Missing labels file name!\n");
-				exit(1);
-			}
-			labelsfilename = argv[par];
-			par++;
-		} else if (strcmp(argv[par],"-k") == 0) {
-			par++;
-			if (par >= argc) {
-				printf("Missing k value!\n");
-				exit(1);
-			}
-			input->k = atoi(argv[par]);
-			par++;
-		} else{
-			printf("WARNING: unrecognized parameter '%s'!\n",argv[par]);
-			par++;
-		}
-	}
-
-	//
-	// Legge i dati e verifica la correttezza dei parametri
-	//
-
-	if(dsfilename == NULL || strlen(dsfilename) == 0){
-		printf("Missing ds file name!\n");
-		exit(1);
-	}
-
-	if(labelsfilename == NULL || strlen(labelsfilename) == 0){
-		printf("Missing labels file name!\n");
-		exit(1);
-	}
-
-
-
-	input->ds = load_data(dsfilename, &input->N, &input->d);
-
-	int nl, dl;
-	input->labels = load_data(labelsfilename, &nl, &dl);
-
-	if(nl != input->N || dl != 1){
-		printf("Invalid size of labels file, should be %ix1!\n", input->N);
-		exit(1);
-	}
-
-	if(input->k <= 0){
-		printf("Invalid value of k parameter!\n");
-		exit(1);
-	}
-
-	input->out = alloc_int_matrix(input->k, 1);
-
-	//
-	// Visualizza il valore dei parametri
-	//
-
-	if(!input->silent){
-		printf("Dataset file name: '%s'\n", dsfilename);
-		printf("Labels file name: '%s'\n", labelsfilename);
-		printf("Dataset row number: %d\n", input->N);
-		printf("Dataset column number: %d\n", input->d);
-		printf("Number of features to extract: %d\n", input->k);
+    if (argc <= 1) {
+        printf("%s -ds <DS> -labels <LABELS> -k <K> [-s] [-d]\n", argv[0]);
+        printf("\nParameters:\n");
+        printf("\tDS: il nome del file ds2 contenente il dataset\n");
+        printf("\tLABELS: il nome del file ds2 contenente le etichette\n");
+        printf("\tk: numero di features da estrarre\n");
+        printf("\nOptions:\n");
+        printf("\t-s: modo silenzioso, nessuna stampa, default 0 - false\n");
+        printf("\t-d: stampa a video i risultati, default 0 - false\n");
+        exit(0);
     }
 
-	// TODO COMMENTARE QUESTA RIGA!
-	//prova(input);
-	//
+    //
+    // Legge i valori dei parametri da riga comandi
+    //
 
-	//
-	// Correlation Features Selection
-	//
+    int par = 1;
+    while (par < argc) {
+        if (strcmp(argv[par], "-s") == 0) {
+            input->silent = 1;
+            par++;
+        } else if (strcmp(argv[par], "-d") == 0) {
+            input->display = 1;
+            par++;
+        } else if (strcmp(argv[par], "-ds") == 0) {
+            par++;
+            if (par >= argc) {
+                printf("Missing dataset file name!\n");
+                exit(1);
+            }
+            dsfilename = argv[par];
+            par++;
+        } else if (strcmp(argv[par], "-labels") == 0) {
+            par++;
+            if (par >= argc) {
+                printf("Missing labels file name!\n");
+                exit(1);
+            }
+            labelsfilename = argv[par];
+            par++;
+        } else if (strcmp(argv[par], "-k") == 0) {
+            par++;
+            if (par >= argc) {
+                printf("Missing k value!\n");
+                exit(1);
+            }
+            input->k = atoi(argv[par]);
+            par++;
+        } else {
+            printf("WARNING: unrecognized parameter '%s'!\n", argv[par]);
+            par++;
+        }
+    }
+
+    //
+    // Legge i dati e verifica la correttezza dei parametri
+    //
+
+    if (dsfilename == NULL || strlen(dsfilename) == 0) {
+        printf("Missing ds file name!\n");
+        exit(1);
+    }
+
+    if (labelsfilename == NULL || strlen(labelsfilename) == 0) {
+        printf("Missing labels file name!\n");
+        exit(1);
+    }
+
+
+    input->ds = load_data(dsfilename, &input->N, &input->d);
+
+    int nl, dl;
+    input->labels = load_data(labelsfilename, &nl, &dl);
+
+    if (nl != input->N || dl != 1) {
+        printf("Invalid size of labels file, should be %ix1!\n", input->N);
+        exit(1);
+    }
+
+    if (input->k <= 0) {
+        printf("Invalid value of k parameter!\n");
+        exit(1);
+    }
+
+    input->out = alloc_int_matrix(input->k, 1);
+
+    //
+    // Visualizza il valore dei parametri
+    //
+
+    if (!input->silent) {
+        printf("Dataset file name: '%s'\n", dsfilename);
+        printf("Labels file name: '%s'\n", labelsfilename);
+        printf("Dataset row number: %d\n", input->N);
+        printf("Dataset column number: %d\n", input->d);
+        printf("Number of features to extract: %d\n", input->k);
+    }
+
+    // TODO COMMENTARE QUESTA RIGA!
+    //prova(input);
+    //
+
+    //
+    // Correlation Features Selection
+    //
     int d = input->d;
-    type* ds=input->ds;
+    type *ds = input->ds;
     int N = input->N;
     type media_elem[d]; //Media degli elementi di ogni feature
-    for (int i=0; i<d; i++){
-        media_elem[i]=calcola_media(ds,N,d,i);
+    for (int i = 0; i < d; i++) {
+        media_elem[i] = calcola_media(ds, N, d, i);
     }
 
     t = clock();
-	cfs(input,media_elem);
-	t = clock() - t;
-	time = ((float)t)/CLOCKS_PER_SEC;
+    cfs(input, media_elem);
+    t = clock() - t;
+    time = ((float) t) / CLOCKS_PER_SEC;
 
-	if(!input->silent)
-		printf("CFS time = %.3f secs\n", time);
-	else
-		printf("%.3f\n", time);
+    if (!input->silent)
+        printf("CFS time = %.3f secs\n", time);
+    else
+        printf("%.3f\n", time);
 
-	//
-	// Salva il risultato
-	//
-	sprintf(fname, "out32_%d_%d_%d.ds2", input->N, input->d, input->k);
-	save_out(fname, input->sc, input->out, input->k);
-	if(input->display){
-		if(input->out == NULL)
-			printf("out: NULL\n");
-		else{
-			int i;
-			printf("sc: %f, out: [", input->sc);
-			for(i=0; i<input->k; i++){
-				printf("%i,", input->out[i]);
-			}
-			printf("]\n");
-		}
-	}
+    //
+    // Salva il risultato
+    //
+    sprintf(fname, "out32_%d_%d_%d.ds2", input->N, input->d, input->k);
+    save_out(fname, input->sc, input->out, input->k);
+    if (input->display) {
+        if (input->out == NULL)
+            printf("out: NULL\n");
+        else {
+            int i;
+            printf("sc: %f, out: [", input->sc);
+            for (i = 0; i < input->k; i++) {
+                printf("%i,", input->out[i]);
+            }
+            printf("]\n");
+        }
+    }
 
-	if(!input->silent)
-		printf("\nDone.\n");
+    if (!input->silent)
+        printf("\nDone.\n");
 
-	dealloc_matrix(input->ds);
-	dealloc_matrix(input->labels);
-	dealloc_matrix(input->out);
-	free(input);
+    dealloc_matrix(input->ds);
+    dealloc_matrix(input->labels);
+    dealloc_matrix(input->out);
+    free(input);
 
-	return 0;
+    return 0;
 }
