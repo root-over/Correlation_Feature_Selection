@@ -233,7 +233,6 @@ void save_out(char* filename, type sc, int* X, int k) {
 
 extern void prova(params* input);
 
-//TODO provare ad ottimizzare
 type media_valori_0_f(const type* ds, const type* labels, int N, int d, int f){
     type somma=0;
     int contatore=0;
@@ -284,39 +283,27 @@ int conta_elementi_1(const type* labels, int N){
 //GIUSTO
 type calcola_media(const type* ds, int N, int d, int f){
     type somma=0;
-    int contatore=0;
     for (int i=f; i<N*d; i+=d){
         //printf("%f,",input->ds[i]);
-        somma=somma+ds[i];
-        contatore++;
+        somma+=ds[i];
     }
     //printf("Ho contato %d elementi della feature %f\n",contatore,input->ds[f]);
+    //TODO non so se ha senso mettere N-1
     return somma/(type)(N);
 }
 
 //GIUSTO
 type deviazione_standard_c(const type* ds, int N, int d, int f){
     //printf("Il primo valore è %f\n", input->ds[0]);
-    int conta=0;
-     type u=calcola_media(ds,N,d,f);
-    //printf("La media è: %f\n",u);
-    type xi;
-    type somma=0;
-    //for(int i=0; i<5; i++) {
-    //    xi=input->ds[i*input->d];
-        //printf("Sto leggendo il valore %f\n", xi);
-    //}
-    for(int i=f; i<N*d; i+=d){
-        xi=ds[i];
-        //printf("Sto leggendo il valore %f\n", xi);
-        conta++;
-        //printf("A%f,",pow(xi-u,2));
-        somma = (type)(somma + pow(xi-u,2));
-        //printf("%f,",somma);
+    type media = calcola_media(ds, N, d, f);
+    type somma_quadrati_diff = 0;
+
+    for (int i = f; i < N * d; i += d) {
+        type diff = ds[i] - media;
+        somma_quadrati_diff += diff * diff;
     }
-    //printf("Ho letto %d valori\n",conta);
-    //printf("La somma finale è: %f\n",somma);
-    return (type)sqrt((1.0/((N)-1)*somma));
+
+    return sqrtf(somma_quadrati_diff / (float)(N));
 }
 
 //GIUSTO
@@ -339,14 +326,10 @@ type calcola_rcf(const type* ds, const type* labels, int N, int d, int f, int n0
 }
 
 //GIUSTO
-type* calcola_max_rcf(params* input){
+type* calcola_max_rcf(params* input, const type* ds, int d, int N){
     int f_rcf_max=0;
     type rcf_max=0;
-
-    type* ds = input->ds;
-    type* label = input->labels;
-    int d = input->d;
-    int N = input->N;
+    type* label=input->labels;
 
     type* rcf = (type*)malloc(d * sizeof(type));
 
@@ -368,7 +351,7 @@ type* calcola_max_rcf(params* input){
     return rcf;
 }
 
-//FIXME GIUSTO(FORSE)
+//GIUSTO
 type calcola_rff(const type* ds, int N, int d, int fx, int fy, const type media_elem[]){
     type mux = media_elem[fx];
     type muy= media_elem[fy];
@@ -382,44 +365,41 @@ type calcola_rff(const type* ds, int N, int d, int fx, int fy, const type media_
         f_max=fx;
         gap=fx-fy;
         for(int i=f_max; i<N*d; i+=d) {
-            type diff_x = ds[i] - mux;
-            type diff_y = ds[i - gap] - muy;
+            type operazione1=ds[i]-mux;
+            type operazione2=ds[i-gap]-muy;
             //printf("%f,",input->ds[i-gap]);
-            sommatoria1 += diff_x * diff_y;
-            sommatoria2 += diff_x * diff_x;
-            sommatoria3 += diff_y * diff_y;
+            sommatoria1+=((operazione1)*(operazione2));
+            sommatoria2+=((operazione1)*(operazione1));
+            sommatoria3+=((operazione2)*(operazione2));
         }
     } else{
         f_max=fy;
         gap=fy-fx;
         for(int i=f_max; i<N*d; i+=d) {
-            type diff_x = ds[i - gap] - mux;
-            type diff_y = ds[i] - muy;
-
-            sommatoria1 += diff_x * diff_y;
-            sommatoria2 += diff_x * diff_x;
-            sommatoria3 += diff_y * diff_y;
+            type operazione1=ds[i-gap]-mux;
+            type operazione2=ds[i]-muy;
+            sommatoria1+=((operazione1)*(operazione2));
+            sommatoria2+=((operazione1)*(operazione1));
+            sommatoria3+=((operazione2)*(operazione2));
         }
     }
 
-    printf("RFF tra fx %d e fy %d: %f\n",fx,fy,sommatoria1/(sqrt(sommatoria2)* sqrt(sommatoria3)));
+    //printf("RFF tra fx %d e fy %d: %f\n",fx,fy,sommatoria1/(sqrtf(sommatoria2)* sqrtf(sommatoria3)));
     return (type)(sommatoria1/(sqrtf(sommatoria2)* sqrtf(sommatoria3)));
 }
 
 
-type calcola_merit(params* input, int f, type media_elem[], type* rcf){
+type calcola_merit(params* input,const type* ds, int N, int d, int k, int f, type media_elem[], type* rcf){
     //printf("Rcf: %f\n",rcf);
-    type* ds = input->ds;
-    int N= input->N;
-    int d = input->d;
-    int dim = input->dim;
-    int k=input->k;
     type rff_tot=0;
+    int dim= input->dim;
 
     for (int i = 0; i < dim; i++) {
-        //printf("Sto per passare fx: %d, fy:%d\n",f,i);
-        rff_tot+= calcola_rff(ds,N,d,f,i,media_elem); //FIN qui è giusto
-        //printf("rff tot: %f\n", rff_tot);
+        if (f != i) {
+            //printf("Sto per passare fx: %d, fy:%d\n",f,i);
+            rff_tot += calcola_rff(ds, N, d, f, i, media_elem); //FIN qui è giusto
+            //printf("rff tot: %f\n", rff_tot);
+        }
     }
     input->rff[f]=rff_tot;
     //FIXME Il valore medio di rcf e rff?
@@ -449,18 +429,21 @@ void cfs(params* input, type media_elem[]){
     int f_merit_massimissimo=0;
     int f_merit_max=0;
     type* rcf;
+
     int d = input->d;
     int k= input->k;
+    type*ds = input->ds;
+    int N = input->N;
 
 
     input->rff = (type*)malloc((d) * sizeof(type));
 
 
-    rcf=calcola_max_rcf(input);
+    rcf=calcola_max_rcf(input,ds,d,N);
 
     while(input->dim<k){
         for(int i=0; i<d; i++){ //per ogni feature f (in questo caso d)
-            merit_attuale = calcola_merit(input,i,media_elem,rcf); //passo la feature i-esima
+            merit_attuale = calcola_merit(input,ds,N,d,k,i,media_elem,rcf); //passo la feature i-esima
             //printf("Merit di %d: %f\n",i,merit_attuale);
             if ((merit_attuale>merit_max) & (checkout(input,i)==0)){
                 merit_max=merit_attuale;
