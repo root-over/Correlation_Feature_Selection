@@ -4,4 +4,4 @@ nasm -f elf32 cfs32.nasm
 gcc -m32 -msse -O0 -no-pie sseutils32.o cfs32.o cfs32c.c -o cfs32c -lm
 pars="";
 for arg; do pars=$pars" "$arg; done;
-./cfs32c $pars
+./cfs32c2 $pars

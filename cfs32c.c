@@ -80,7 +80,7 @@ typedef struct {
 
 //riserva un blocco di memoria
 void *get_block(int size, int elements) {
-    return _mm_malloc(elements * size, 16);
+    return _mm_malloc(elements * size, 32);
     //è generalmente utilizzata per allocare memoria allineata
     //in modo specifico per migliorare le prestazioni delle istruzioni SIMD.
 }
@@ -106,23 +106,23 @@ void dealloc_matrix(void *mat) {
 }
 
 /*
-* 
+*
 * 	load_data
 * 	=========
-* 
+*
 *	Legge da file una matrice di N righe
 * 	e M colonne e la memorizza in un array lineare in row-major order
-* 
+*
 * 	Codifica del file:
 * 	primi 4 byte: numero di righe (N) --> numero intero
 * 	successivi 4 byte: numero di colonne (M) --> numero intero
 * 	successivi N*M*4 byte: matrix data in row-major order --> numeri floating-point a precisione singola
-* 
+*
 *****************************************************************************
 *	Se lo si ritiene opportuno, � possibile cambiare la codifica in memoria
-* 	della matrice. 
+* 	della matrice.
 *****************************************************************************
-* 
+*
 */
 MATRIX load_data(char *filename, int *n, int *k) {
     FILE *fp;
@@ -162,10 +162,10 @@ MATRIX load_data(char *filename, int *n, int *k) {
 /*
 * 	save_data
 * 	=========
-* 
+*
 *	Salva su file un array lineare in row-major order
 *	come matrice di N righe e M colonne
-* 
+*
 * 	Codifica del file:
 * 	primi 4 byte: numero di righe (N) --> numero intero a 32 bit
 * 	successivi 4 byte: numero di colonne (M) --> numero intero a 32 bit
@@ -203,9 +203,9 @@ void save_data(char *filename, void *X, int n, int k) {
 /*
 * 	save_out
 * 	=========
-* 
+*
 *	Salva su file un array lineare composto da k+1 elementi.
-* 
+*
 * 	Codifica del file:
 * 	primi 4 byte: contenenti l'intero 1 		--> numero intero a 32 bit
 * 	successivi 4 byte: numero di elementi (k+1) --> numero intero a 32 bit
@@ -269,7 +269,7 @@ type media_valori_1_f(const type *ds, const type *labels, int N, int d, int f) {
     return somma / (type) contatore;
 }
 
-//GIUSTISSIMO
+//GIUSTO
 int conta_elementi_1(const type *labels, int N) {
     int contatore = 0;
     for (int i = 0; i < (N); i++) {
@@ -309,11 +309,11 @@ type calcola_rcf(const type *ds, const type *labels, int N, int d, int f, int n0
     int n = n0 + n1;
     type sf = deviazione_standard_c(ds, N, d, f);
 
-    return (type) (((mu0 - mu1) / sf) * sqrt((n0 * n1) / pow(n, 2))); //Rcf
+    return fabsf((type) (((mu0 - mu1) / sf) * sqrt((n0 * n1) / pow(n, 2)))); //Rcf
 }
 
 //GIUSTO
-type *calcola_max_rcf(params *input, const type *ds, int d, int N) {
+type* calcola_max_rcf(params *input, const type *ds, int d, int N) {
     int f_rcf_max = 0;
     type rcf_max = 0;
     type *label = input->labels;
@@ -348,6 +348,7 @@ type calcola_rff(const type *ds, int N, int d, int fx, int pos_fy, const type me
     int f_max;
     int gap;
 
+    //MIGLIORABILE
     if (fx > fy) {
         f_max = fx;
         gap = fx - fy;
@@ -370,48 +371,56 @@ type calcola_rff(const type *ds, int N, int d, int fx, int pos_fy, const type me
         }
     }
 
-    //printf("RFF tra fx %d e fy %d: %f ",fx,fy,sommatoria1/(sqrtf(sommatoria2)* sqrtf(sommatoria3)));
+    //printf("RFF tra fx %d e fy %d: %f \n",fx,fy,sommatoria1/(sqrtf(sommatoria2)* sqrtf(sommatoria3)));
     return (type) (sommatoria1 / (sqrtf(sommatoria2) * sqrtf(sommatoria3)));
 }
 
-type media_rcf(params *input, const type *rcf) {
+type somma_rcf(params *input, const type *rcf) {
     type rcf_tot = 0;
     for (int i = 0; i < input->dim; i++) {
         rcf_tot += rcf[input->out[i]];
-        printf("L'rcf di %d è %f\n", input->out[i], rcf[input->out[i]]);
+        //printf("L'rcf di %d è %f\n", input->out[i], rcf[input->out[i]]);
     }
-    printf("ritorno la media %f\n", rcf_tot / (type) input->dim);
+    //printf("ritorno la media %f\n", rcf_tot / (type) input->dim);
     return rcf_tot;
 }
 
 type calcola_merit(params *input, const type *ds, int N, int d, int k, int f, type media_elem[], type *rcf, int *out,
-                   type rff_totale, int dim) {
+                   type rff_totale, int dim, int coppie) {
     //printf("Rcf: %f\n",rcf);
     type rff_tot = 0;
 
     for (int i = 0; i < dim; i++) {
+        //TODO potrebbe avere senso commentarlo
         if (f != i) {
             rff_tot += calcola_rff(ds, N, d, f, i, media_elem, out);
-            //printf(" Totale tra %d e %d è: %f\n",f,input->out[i],rff_tot);
+            //printf(" Tota
         }
     }
-    //type rff_totale=input->rff_totale;
+
+    //printf("RFF di %d e %d è %f\n",)
     input->rff[f] = rff_tot;
-    //FIXME Il valore medio di rcf e rff
+    //FIXME probabilmente il problema sta nel calcolo dell'rff totale
     //printf("Merit ritornato: %f\n",input->k* abs(rcf))/(sqrt(input->k+(input->k*(input->k-1)* abs(rff_tot+input->rff_totale))));
-    return (type) (((type) k * fabsf((rcf[f])) / (sqrtf((type) k + ((type) k * ((type) k - 1) *
-                                                                    fabsf((rff_tot + rff_totale) /
-                                                                          (type) (dim + 1)))))));
+    return (type) (((type) (dim+1) * fabsf((somma_rcf(input,rcf)+rcf[f])/(type)(dim+1)) / (sqrtf((type) (dim+1) + ((type) (dim+1) * ((type) (dim+1) - 1) *
+                                                                                                                   fabsf((rff_tot + rff_totale) /
+                                                                                                                         (type) (dim+coppie+1)))))));
+}
+int checkout(int* out,int dim, int f){
+    for(int i=0; i< dim; i++){
+        if(out[i]==f) return  1;
+    }
+    return 0;
 }
 
 void cfs(params *input, type media_elem[]) {
     // ------------------------------------------------------------
     // Codificare qui l'algoritmo di Correlation Features Selection
     // ------------------------------------------------------------
+    int coppie=0;
     type merit_attuale;
     type merit_max = 0;
     type merit_massimissimo = 0;
-    //int f_merit_massimissimo;
     int f_merit_max = 0;
     type *rcf;
 
@@ -424,28 +433,39 @@ void cfs(params *input, type media_elem[]) {
 
     rcf = calcola_max_rcf(input, ds, d, N);
 
+
     while (input->dim < k) {
         int dim = input->dim;
         int *out = input->out;
         type rff_totale = input->rff_totale;
         for (int i = 0; i < d; i++) { //per ogni feature f (in questo caso d)
-            merit_attuale = calcola_merit(input, ds, N, d, k, i, media_elem, rcf, out, rff_totale,
-                                          dim); //passo la feature i-esima
-            //printf("Merit di %d: %f\n",i,merit_attuale);
-            if (merit_attuale > merit_max) {
-                merit_max = merit_attuale;
-                f_merit_max = i;
-                if (merit_max > merit_massimissimo) {
-                    merit_massimissimo = merit_max;
+            if(checkout(out,dim,i)==0){
+                merit_attuale = calcola_merit(input, ds, N, d, input->dim, i, media_elem, rcf, out, rff_totale,
+                                              dim,coppie); //passo la feature i-esima
+
+                //printf("Merit di %d: %f\n",i,merit_attuale);
+                if (merit_attuale > merit_max) {
+                    merit_max = merit_attuale;
+                    f_merit_max = i;
+                    if (merit_max > merit_massimissimo) {
+                        merit_massimissimo = merit_max;
+                    }
                 }
             }
         }
+
+
         //printf("Rff del merit massimo %d è %f\n",f_merit_max,input->rff[f_merit_max]);
         //for (int i = 0; i < input->dim; i++) {
         //    input->rff_totale += calcola_rff(input, f_merit_max, i, media_elem);
         //}
+        //FIXME potenzialmente sbagliato
         input->rff_totale += input->rff[f_merit_max];
 
+
+        coppie+=dim+1;
+        printf("somma crf: %f\n",(somma_rcf(input,rcf)+rcf[f_merit_max]));
+        printf("media crf: %f\n",(somma_rcf(input,rcf)+rcf[f_merit_max])/(type)(dim+1));
         //printf("Rff_totale: %f:\n",input->rff_totale);
         //printf("Mi trovo in posizione %d\n",input->dim);
         //printf("Merit massimo attuale è della feature %d, con valore %f\n",f_merit_max,merit_max);
@@ -456,6 +476,7 @@ void cfs(params *input, type media_elem[]) {
     input->sc = merit_massimissimo;
     //printf("Merit massimo è della feature %d, con valore %f\n",f_merit_massimissimo,merit_massimissimo);
 }
+
 
 int main(int argc, char **argv) {
 
@@ -581,9 +602,6 @@ int main(int argc, char **argv) {
         printf("Number of features to extract: %d\n", input->k);
     }
 
-    // TODO COMMENTARE QUESTA RIGA!
-    //prova(input);
-    //
 
     //
     // Correlation Features Selection
