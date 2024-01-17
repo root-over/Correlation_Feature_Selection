@@ -80,6 +80,7 @@ extern free_block
 
 global prova
 
+
 input		equ		8
 
 msg	db	'sc:',32,0
@@ -101,7 +102,7 @@ prova:
 		; ------------------------------------------------------------
 
 		; elaborazione
-		
+
 		; esempio: stampa input->sc
 		mov EAX, [EBP+input]	; indirizzo della struttura contenente i parametri
         ; [EAX] input->ds; 			// dataset
@@ -114,9 +115,9 @@ prova:
 		; [EAX + 28] input->display;
 		; [EAX + 32] input->silent;
 		MOVSS XMM0, [EAX+12]
-		MOVSS [sc], XMM0 
-		prints msg            
-		printss sc     
+		MOVSS [sc], XMM0
+		prints msg
+		printss sc
 		prints nl
 		; ------------------------------------------------------------
 		; Sequenza di uscita dalla funzione

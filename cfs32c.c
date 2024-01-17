@@ -224,7 +224,6 @@ void save_out(char *filename, type sc, int *X, int k) {
         fwrite(&sc, sizeof(type), 1, fp);
         //svrive i dati della matrice linearizzata
         fwrite(X, sizeof(int), k, fp);
-        //printf("%i %i\n", ((int*)X)[0], ((int*)X)[1]);
     }
     fclose(fp);
 }
@@ -239,18 +238,13 @@ type media_valori_0_f(const type *ds, const type *labels, int N, int d, int f) {
     int cont = 0;
 
     for (int i = f; i < N * d; i += d) {
-        //printf("%d",(int)input->labels[i%input->N]);
         cont++;
-        //printf("i=%d | j=%d,",i,i/input->d);
         if (labels[i / d] == 0) {//Magaria per scorrere il vettore label attraverso l'indice del for
-            //printf("%f,",input->ds[i]);
-            //printf("%f,",input->labels[(i%input->N)/input->d]);
             somma = somma + ds[i];
             contatore++;
         }
     }
-    //printf("contatore di 0: %d\n",contatore);
-    //printf("Iterazioni totali: %d", cont);
+
     return somma / (type) contatore;
 }
 
@@ -298,7 +292,7 @@ type deviazione_standard_c(const type *ds, int N, int d, int f) {
         type diff = ds[i] - media;
         somma_quadrati_diff += diff * diff;
     }
-    return sqrtf(somma_quadrati_diff / (type) (N-1)); //TODO nel codice loro c'è N-1
+    return sqrtf(somma_quadrati_diff / (type) (N-1));
 }
 
 //GIUSTO
@@ -309,7 +303,7 @@ type calcola_rcf(const type *ds, const type *labels, int N, int d, int f, int n0
     int n = n0 + n1;
     type sf = deviazione_standard_c(ds, N, d, f);
 
-    return fabsf((type) (((mu0 - mu1) / sf) * sqrt((n0 * n1) / (type)(n*n)))); //Rcf
+    return fabsf((type) (((mu0 - mu1) / sf) * sqrtf((type)(n0 * n1) / (type)(n*n)))); //Rcf
 }
 
 //GIUSTO
@@ -369,8 +363,10 @@ type calcola_rff(const type *ds, int N, int d, int fx, int pos_fy, const type me
             sommatoria3 += ((operazione2) * (operazione2));
         }
     }
-    return fabsf((type) (sommatoria1 / (sqrt(sommatoria2 * sommatoria3))));
+    return fabsf((type) (sommatoria1 / (sqrtf(sommatoria2 * sommatoria3))));
 }
+//extern float calcola_rff(const float *ds, int N, int d, int fx, int pos_fy, const float media_elem[], const int *out);
+
 
 type somma_rcf(const type *rcf, int dim, const int* out) {
     type rcf_tot = 0;
@@ -382,23 +378,16 @@ type somma_rcf(const type *rcf, int dim, const int* out) {
 
 type calcola_merit(params *input, const type *ds, int N, int d, int f, type media_elem[], type *rcf, int *out,
                    type rff_totale, int dim, int coppie) {
-    //printf("Rcf: %f\n",rcf);
     type rff_tot = 0;
 
     for (int i = 0; i < dim; i++) {
         //TODO invece di calcolare ogni volta l'rff calcolare tutti gli rff e metterli in una matrice dxd e prelevare solo quello che serve
-        //if (f != i) {
             rff_tot += calcola_rff(ds, N, d, f, i, media_elem, out);
-        //}
     }
     input->rff[f] = rff_tot;
-    printf("La feature %d ha rff %f\n",f,rff_tot);
-    printf("La feature %d + tot  ha rff %f\n",f,rff_totale+rff_tot);
-    //FIXME probabilmente il problema sta nel calcolo dell'rff totale
-    //printf("Merit ritornato: %f\n",input->k* abs(rcf))/(sqrt(input->k+(input->k*(input->k-1)* abs(rff_tot+input->rff_totale))));
     return (type) (((type) (dim+1) * (somma_rcf(rcf,dim,out)+rcf[f])/(type)(dim+1) / (sqrtf((type) (dim+1) + ((type) (dim+1) * ((type) (dim+1) - 1) *
                                                                                                                             (rff_tot + rff_totale) /
-                                                                                                                         (type) (dim+coppie+1))))));
+                                                                                                                         (type) (dim+coppie))))));
 }
 int checkout(const int* out,int dim, int f){
     for(int i=0; i< dim; i++){
@@ -418,6 +407,7 @@ void cfs(params *input, type media_elem[]) {
     int f_merit_max = 0;
     type *rcf;
 
+
     int d = input->d;
     int k = input->k;
     type *ds = input->ds;
@@ -428,13 +418,12 @@ void cfs(params *input, type media_elem[]) {
     rcf = calcola_max_rcf(input, ds, d, N);
 
     while (input->dim < k) {
-        int dim = input->dim;
         int *out = input->out;
         type rff_totale = input->rff_totale;
         for (int i = 0; i < d; i++) { //per ogni feature f (in questo caso d)
-            if(checkout(out,dim,i)==0){
+            if(checkout(out,input->dim,i)==0){
                 merit_attuale = calcola_merit(input, ds, N, d, i, media_elem, rcf, out, rff_totale,
-                                              dim,coppie); //passo la feature i-esima
+                                              input->dim,coppie); //passo la feature i-esima
                 if (merit_attuale > merit_max) {
                     merit_max = merit_attuale;
                     f_merit_max = i;
@@ -445,27 +434,16 @@ void cfs(params *input, type media_elem[]) {
             }
         }
 
-        //printf("Rff del merit massimo %d è %f\n",f_merit_max,input->rff[f_merit_max]);
-
-        //FIXME potenzialmente sbagliato
         input->rff_totale += input->rff[f_merit_max];
-        printf("RFF TOTALE %f\n",rff_totale);
 
+        coppie+=input->dim;
 
-
-        coppie+=dim+1;
-        //printf("somma crf: %f\n",(somma_rcf(input,rcf)+rcf[f_merit_max]));
-        //printf("media crf: %f\n",(somma_rcf(input,rcf)+rcf[f_merit_max])/(type)(dim+1));
-        //printf("Rff_totale: %f:\n",input->rff_totale);
-        //printf("Mi trovo in posizione %d\n",input->dim);
-        //printf("Merit massimo attuale è della feature %d, con valore %f\n",f_merit_max,merit_max);
         input->out[input->dim] = f_merit_max;
         input->dim++;
+
         merit_max = 0;
     }
-    printf("RFF TOTALE %f\n",input->rff_totale);
     input->sc = merit_massimissimo;
-    //printf("Merit massimo è della feature %d, con valore %f\n",f_merit_massimissimo,merit_massimissimo);
 }
 
 int main(int argc, char **argv) {
