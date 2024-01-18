@@ -80,7 +80,7 @@ typedef struct {
 
 //riserva un blocco di memoria
 void *get_block(int size, int elements) {
-    return _mm_malloc(elements * size, 32);
+    return _mm_malloc(elements * size, 16);
     //è generalmente utilizzata per allocare memoria allineata
     //in modo specifico per migliorare le prestazioni delle istruzioni SIMD.
 }
@@ -331,7 +331,7 @@ type* calcola_max_rcf(params *input, const type *ds, int d, int N) {
 }
 
 //GIUSTO
-type calcola_rff(const type *ds, int N, int d, int fx, int pos_fy, const type media_elem[], const int *out) {
+/*type calcola_rff(const type *ds, int N, int d, int fx, int pos_fy, const type media_elem[], const int *out) {
     int fy = out[pos_fy];
     type mux = media_elem[fx];
     type muy = media_elem[fy];
@@ -364,8 +364,8 @@ type calcola_rff(const type *ds, int N, int d, int fx, int pos_fy, const type me
         }
     }
     return fabsf((type) (sommatoria1 / (sqrtf(sommatoria2 * sommatoria3))));
-}
-//extern float calcola_rff(const float *ds, int N, int d, int fx, int pos_fy, const float media_elem[], const int *out);
+}*/
+extern float calcola_rff(const float *ds, int N, int d, int fx, int pos_fy, const float media_elem[], const int *out);
 
 
 type somma_rcf(const type *rcf, int dim, const int* out) {
@@ -445,6 +445,8 @@ void cfs(params *input, type media_elem[]) {
     }
     input->sc = merit_massimissimo;
 }
+
+extern void hello_world();
 
 int main(int argc, char **argv) {
     char fname[256];
@@ -583,6 +585,7 @@ int main(int argc, char **argv) {
 
     t = clock();
     cfs(input, media_elem);
+    //hello_world();
     t = clock() - t;
     time = ((float) t) / CLOCKS_PER_SEC;
 
