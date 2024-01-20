@@ -108,18 +108,17 @@ hello_world:
 
 
 calcola_rff:
-    mov eax, [esp + 4]         ; ds (float*)
-    mov ebx, [esp + 8]         ; N
-    mov ecx, [esp + 12]        ; d
-    mov edx, [esp + 16]        ; fx
-    mov esi, [esp + 20]        ; pos_fy
-    mov edi, [esp + 24]        ; media_elem (flaot*)
-    mov ebp, [esp + 28]        ; out (int*)
+    start
+    mov eax, [ebp + 8]         ; ds (float*)
+    mov ebx, [ebp + 12]           ; N
+    ;[ebp + 16] d
+    mov ecx, [ebp + 20]           ; fx
+    mov edx, [ebp + 24]           ; fy
+    movss xmm3, [ebp + 28]        ; media_elem_fx
+    movss xmm4, [ebp + 32]        ; media_elem_fy
 
-    ; Calcola fy
-    movzx eax, word [ebp + esi * 4] ; ds[pos_fy] (fy)
-    movzx ebx, word [edi + edx * 4]  ; media_elem[fx]
-    movzx ecx, word [edi + eax * 4]  ; media_elem[fy]
+    imul ebx, [ebp + 16]            ; N x d (grandezza della matrice)
+;cvtsi2ss xmm1, eax (converte)
 
     ; Inizializza sommatorie
     xorps xmm0, xmm0  ; sommatoria1
@@ -127,79 +126,93 @@ calcola_rff:
     xorps xmm2, xmm2  ; sommatoria3
 
     ; Calcolare f_max e gap
-    cmp edx, eax
+    cmp ecx, edx
     jg greater_than
     ; fx <= fy
-    mov eax, ebx
-    sub eax, ecx
-    mov [f_max], eax
-    mov eax, ecx
-    sub eax, ebx
-    mov [gap], eax
+    mov [f_max], edx ; metto dentro f_max fy TODO attualmente creo una variabile globale ma meglio usare un registro
+    sub edx, ecx ; calcolo il gap
+    mov [gap], edx; assegno il gap alla variabile globale apposita TODO attualmente creo una variabile globale ma meglio usare un registro
     jmp start_loop
 
 greater_than:
     ; fx > fy
-    mov eax, ecx
-    sub eax, ebx
-    mov [f_max], eax
-    mov eax, ebx
-    sub eax, ecx
-    mov [gap], eax
-
+    mov [f_max], ecx ;metto dentro f_max fx FIXME attualmente creo una variabile globale ma meglio usare un registro
+    sub ecx, edx ; calcolo il gap
+    mov [gap], ecx ;assegno il gap alla variabile globale apposita FIXME attualmente creo una variabile globale ma meglio usare un registro
 
 start_loop:
     ; Inizializzo il contatore del loop
-    mov ecx, f_max
+    mov ecx, [f_max]
 
 main_loop:
+    cmp ecx, ebx
+    jg exit_loop
     ; Calcolo l'indice dell'array
-    imul edx, ebx
-    add eax, edx
-    add ebx, eax
-    sub ebx, [gap]
+    mov esi, ecx ; i
+    mov edi, [gap]
+    sub esi, edi ; i - gap
 
     ; Carico i dati dalla memoria
-    movss xmm3, [esi + eax * 4]  ; ds[i]
-    movss xmm4, [esi + ebx * 4]  ; ds[i - gap]
+    movss xmm6, [eax + ecx * 4]  ; ds[i]
+    movss xmm7, [eax + esi * 4]  ; ds[i - gap]
 
-    ;FIXME il segmentatio fault avviene qua
     ; Sottraggo mux e muy
-    subss xmm3, xmm0  ; operazione1 = ds[i] - mux
-    subss xmm4, xmm2  ; operazione2 = ds[i - gap] - muy
+    subss xmm6, xmm3  ; operazione1 = ds[i] - mux
+    subss xmm7, xmm4  ; operazione2 = ds[i - gap] - muy
+
+    ; inizializzo registri e moltiplico
+
+    xorps xmm5, xmm5  ; TODO si può evitare di inizializzare
+    movss xmm5, xmm6
+    mulss xmm5, xmm7  ;operazione1 * operazione2
+    addss xmm0, xmm5  ; sommatoria1 += operazione1 * operazione2
+
+    xorps xmm5, xmm5
+    movss xmm5, xmm6
+    mulss xmm5, xmm5 ; operazione1 * operazione1
+    addss xmm1, xmm5 ; sommatoria2 += operazione1 * operazione1
+
+    xorps xmm5, xmm5
+    movss xmm5, xmm7
+    mulss xmm5, xmm5 ; operazione2 * operazione2
+    addss xmm2, xmm5 ; sommatoria3 += operazione2 * operazione2
+
+    add ecx,[ebp + 16]
+
+    jmp main_loop
+
+    ;TODO incrementare l'indice i di d
 
     ; Moltiplico
-    mulss xmm1, xmm3  ; operazione1 * operazione2
-    mulss xmm2, xmm4  ; operazione1 * operazione1
-    mulss xmm3, xmm3  ; operazione2 * operazione2
+    ;mulss xmm5, xmm6  ; operazione1 * operazione2
+    ;mulss xmm2, xmm4  ; operazione1 * operazione1
+    ;mulss xmm3, xmm3  ; operazione2 * operazione2
 
     ; sommo
-    addss xmm0, xmm3  ; sommatoria1 += operazione1 * operazione2
-    addss xmm1, xmm2  ; sommatoria2 += operazione1 * operazione1
-    addss xmm2, xmm3  ; sommatoria3 += operazione2 * operazione2
+    ;addss xmm0, xmm3  ; sommatoria1 += operazione1 * operazione2
+    ;addss xmm1, xmm2  ; sommatoria2 += operazione1 * operazione1
+    ;addss xmm2, xmm3  ; sommatoria3 += operazione2 * operazione2
 
-    ; Mi muovo alla prossima iterazione
-    add ecx, ebx
-    cmp ecx, [esp + 4]
-    jl main_loop
 
+exit_loop:
     ; Calcolo il risultato
+    mulss xmm1, xmm2   ; sommatoria2 * sommatoria3
     sqrtss xmm1, xmm1  ; sqrt(sommatoria2)
-    mulss xmm1, xmm2   ; sqrt(sommatoria2 * sommatoria3)
+
 
     ; calcolo fabs(sommatoria1 / (sommatoria2 * sommatoria3))
     divss xmm0, xmm1
-    movss xmm1, xmm0
-    andps xmm1, xmm_size [abs_mask]
-    movss [esp], xmm1  ; Memorizzo il risultato nella prima dword dello stack
+    ;andps xmm0, xmm_size [abs_mask] ;FIXME non so se è giusto il valore assoluto messo così
 
     ; Pulisco e return
-    fld dword [esp]
-    add esp, 4
-    ret
+    mov eax,[ebp + 36]
+    movss [eax], xmm0
+    mov eax,ebx
+    stop
+
 
 section .data
-abs_mask dd 0x7FFFFFFF  ; Maschera per pulire i registri xmm
+abs_mask dd 0x7FFFFFFF  ; Maschera da mettere in and per fare il valore assoluto
 xmm_size equ 16  ; Dimensione in byte di un registro XMM (128 bit)
 
 prova:

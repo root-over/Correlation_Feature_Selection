@@ -280,6 +280,7 @@ type calcola_media(const type *ds, int N, int d, int f) {
     for (int i = f; i < N * d; i += d) {
         somma += ds[i];
     }
+    //printf("La media della feature %d è %f\n",f,somma / (type) (N));
     return somma / (type) (N);
 }
 
@@ -365,7 +366,7 @@ type* calcola_max_rcf(params *input, const type *ds, int d, int N) {
     }
     return fabsf((type) (sommatoria1 / (sqrtf(sommatoria2 * sommatoria3))));
 }*/
-extern float calcola_rff(const float *ds, int N, int d, int fx, int pos_fy, const float media_elem[], const int *out);
+extern float calcola_rff(const float *ds, int N, int d, int fx, int fy, type media_elem_fx, type media_elem_fy, type* ret);
 
 
 type somma_rcf(const type *rcf, int dim, const int* out) {
@@ -381,8 +382,10 @@ type calcola_merit(params *input, const type *ds, int N, int d, int f, type medi
     type rff_tot = 0;
 
     for (int i = 0; i < dim; i++) {
-        //TODO invece di calcolare ogni volta l'rff calcolare tutti gli rff e metterli in una matrice dxd e prelevare solo quello che serve
-            rff_tot += calcola_rff(ds, N, d, f, i, media_elem, out);
+        type x=0;
+        calcola_rff(ds, N, d, f, out[i], media_elem[f],media_elem[out[i]] ,&x);
+        //printf("RFF %d - %d: %f\n",f,i,fabsf(x));
+        rff_tot+=fabsf(x);
     }
     input->rff[f] = rff_tot;
     return (type) (((type) (dim+1) * (somma_rcf(rcf,dim,out)+rcf[f])/(type)(dim+1) / (sqrtf((type) (dim+1) + ((type) (dim+1) * ((type) (dim+1) - 1) *
@@ -407,7 +410,6 @@ void cfs(params *input, type media_elem[]) {
     int f_merit_max = 0;
     type *rcf;
 
-
     int d = input->d;
     int k = input->k;
     type *ds = input->ds;
@@ -416,6 +418,12 @@ void cfs(params *input, type media_elem[]) {
     input->rff=alloc_matrix(N,d);
 
     rcf = calcola_max_rcf(input, ds, d, N);
+
+    printf("ds[%d]-mux è: %f\n",0,ds[0]-media_elem[0]);
+    printf("ds[%d]-mux è: %f\n",45,ds[45]-media_elem[45]);
+    printf("ds[%d] è: %f\n",0,ds[0]);
+    printf("ds[%d]  è: %f\n",45,ds[45]);
+
 
     while (input->dim < k) {
         int *out = input->out;
