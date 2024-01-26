@@ -80,7 +80,7 @@ typedef struct {
 
 //riserva un blocco di memoria
 void *get_block(int size, int elements) {
-    return _mm_malloc(elements * size, 16);
+    return _mm_malloc(elements * size, 32);
     //è generalmente utilizzata per allocare memoria allineata
     //in modo specifico per migliorare le prestazioni delle istruzioni SIMD.
 }
@@ -148,8 +148,19 @@ MATRIX load_data(char *filename, int *n, int *k) {
     //alloca la matrice "data" con dimensione rows e cols
     MATRIX data = alloc_matrix(rows, cols);
 
+    type *temp = malloc(rows*cols*sizeof (type));
+    fread(temp,sizeof (type),rows*cols,fp);
+
+    for (int col=0; col < cols; col++){
+        for (int row = 0; row < rows; row++) {
+            data[col * rows + row]=temp[row * cols + col];
+            //printf("elemento lienarizzato %f\n ",data[col*rows+row]);
+        }
+    }
+    free(temp);
+    //fread(data, sizeof(type), rows * cols, fp);
+
     //popola la matrice con gli elementi all'interno del file
-    fread(data, sizeof(type), rows * cols, fp);
     fclose(fp);
 
     //assegna ai valori puntati da n e k il numero di righe e il numero di colonne
@@ -235,12 +246,11 @@ extern void prova(params *input);
 type media_valori_0_f(const type *ds, const type *labels, int N, int d, int f) {
     type somma = 0;
     int contatore = 0;
-    int cont = 0;
+    int inizio = f*N;
 
-    for (int i = f; i < N * d; i += d) {
-        cont++;
-        if (labels[i / d] == 0) {//Magaria per scorrere il vettore label attraverso l'indice del for
-            somma = somma + ds[i];
+    for (int i = 0; i < N; i ++) {
+        if (labels[i] == 0) {
+            somma = somma + ds[inizio + i];
             contatore++;
         }
     }
@@ -251,15 +261,15 @@ type media_valori_0_f(const type *ds, const type *labels, int N, int d, int f) {
 type media_valori_1_f(const type *ds, const type *labels, int N, int d, int f) {
     type somma = 0;
     int contatore = 0;
-    int cont = 0;
+    int inizio = f*N;
 
-    for (int i = f; i < N * d; i += d) {
-        cont++;
-        if (labels[i / d] == 1) {
-            somma = somma + ds[i];
+    for (int i = 0; i < N; i ++) {
+        if (labels[i] == 1) {
+            somma = somma + ds[inizio + i];
             contatore++;
         }
     }
+
     return somma / (type) contatore;
 }
 
@@ -277,10 +287,10 @@ int conta_elementi_1(const type *labels, int N) {
 //GIUSTO
 type calcola_media(const type *ds, int N, int d, int f) {
     type somma = 0;
-    for (int i = f; i < N * d; i += d) {
-        somma += ds[i];
+    int inizio = f*N;
+    for (int i = 0; i < N; i ++) {
+        somma += ds[inizio + i];
     }
-    //printf("La media della feature %d è %f\n",f,somma / (type) (N));
     return somma / (type) (N);
 }
 
@@ -288,27 +298,51 @@ type calcola_media(const type *ds, int N, int d, int f) {
 type deviazione_standard_c(const type *ds, int N, int d, int f) {
     type media = calcola_media(ds, N, d, f);
     type somma_quadrati_diff = 0;
+    int inizio = f*N;
 
-    for (int i = f; i < N * d; i += d) {
-        type diff = ds[i] - media;
+    for (int i = 0; i < N; i++) {
+        type diff = ds[inizio + i] - media;
         somma_quadrati_diff += diff * diff;
     }
     return sqrtf(somma_quadrati_diff / (type) (N-1));
 }
+// Metodo per precalcolare i valori medi per ogni feature
+void precompute_means(type *ds, type *labels, int N, int d, type *precomputed_means) {
+    for (int f = 0; f < d; f++) {
+        type sum_0 = 0.0;
+        int count_0 = 0;
+        type sum_1 = 0.0;
+        int count_1 = 0;
 
-//GIUSTO
-type calcola_rcf(const type *ds, const type *labels, int N, int d, int f, int n0, int n1) {
-    type mu0 = media_valori_0_f(ds, labels, N, d, f);
-    type mu1 = media_valori_1_f(ds, labels, N, d, f);
+        for (int i = 0; i < N; i++) {
+            if (labels[i] == 0) {
+                sum_0 += ds[f * N + i];
+                count_0++;
+            } else if (labels[i] == 1) {
+                sum_1 += ds[f * N + i];
+                count_1++;
+            }
+        }
 
-    int n = n0 + n1;
-    type sf = deviazione_standard_c(ds, N, d, f);
-
-    return fabsf((type) (((mu0 - mu1) / sf) * sqrtf((type)(n0 * n1) / (type)(n*n)))); //Rcf
+        precomputed_means[f * 2] = count_0 > 0 ? sum_0 / (type)count_0 : 0; // Media per la classe 0
+        precomputed_means[f * 2 + 1] = count_1 > 0 ? sum_1 / (type)count_1 : 0; // Media per la classe 1
+    }
 }
 
 //GIUSTO
-type* calcola_max_rcf(params *input, const type *ds, int d, int N) {
+// Funzione ottimizzata per calcolare Rcf
+type calcola_rcf(const type *ds, const type *labels, int N, int d, int f, int n0, int n1, const type* precomputed_means) {
+    type mu0 = precomputed_means[f * 2];     // Utilizzando il valore medio per la classe 0
+    type mu1 = precomputed_means[f * 2 + 1]; // Utilizzando il valore medio per la classe 1
+
+    type sf = deviazione_standard_c(ds, N, d, f);
+
+    int n = n0 + n1;
+    return fabsf(((mu0 - mu1) / sf) * sqrtf((type)(n0 * n1) / (type)(n * n)));
+}
+
+//GIUSTO
+type* calcola_max_rcf(params *input, const type *ds, int d, int N, type* precomputed_means) {
     int f_rcf_max = 0;
     type rcf_max = 0;
     type *label = input->labels;
@@ -319,7 +353,7 @@ type* calcola_max_rcf(params *input, const type *ds, int d, int N) {
     int n0 = N - n1;
 
     for (int i = 0; i < d; i++) {
-        rcf[i] = calcola_rcf(ds, label, N, d, i, n0, n1);
+        rcf[i] = calcola_rcf(ds, label, N, d, i, n0, n1, precomputed_means);
 
         if (rcf[i] > rcf_max) {
             f_rcf_max = i;
@@ -332,41 +366,27 @@ type* calcola_max_rcf(params *input, const type *ds, int d, int N) {
 }
 
 //GIUSTO
-/*type calcola_rff(const type *ds, int N, int d, int fx, int pos_fy, const type media_elem[], const int *out) {
-    int fy = out[pos_fy];
-    type mux = media_elem[fx];
-    type muy = media_elem[fy];
+/*
+type calcola_rff(const type *ds, int N, int d, int fx, int fy, type media_elem_fx, type media_elem_fy) {
+    type mux = media_elem_fx;
+    type muy = media_elem_fy;
     type sommatoria1 = 0;
     type sommatoria2 = 0;
     type sommatoria3 = 0;
-    int f_max;
-    int gap;
+    int inizio_fx = fx*N;
+    int inizio_fy = fy*N;
 
-    //MIGLIORABILE
-    if (fx > fy) {
-        f_max = fx;
-        gap = fx - fy;
-        for (int i = f_max; i < N * d; i += d) {
-            type operazione1 = ds[i] - mux;
-            type operazione2 = ds[i - gap] - muy;
-            sommatoria1 += ((operazione1) * (operazione2));
-            sommatoria2 += ((operazione1) * (operazione1));
-            sommatoria3 += ((operazione2) * (operazione2));
-        }
-    } else {
-        f_max = fy;
-        gap = fy - fx;
-        for (int i = f_max; i < N * d; i += d) {
-            type operazione1 = ds[i - gap] - mux;
-            type operazione2 = ds[i] - muy;
-            sommatoria1 += ((operazione1) * (operazione2));
-            sommatoria2 += ((operazione1) * (operazione1));
-            sommatoria3 += ((operazione2) * (operazione2));
-        }
+
+    for (int i = 0; i < N; i ++) {
+       type operazione1 = ds[inizio_fx + i] - mux;
+       type operazione2 = ds[inizio_fy+ i] - muy;
+       sommatoria1 += ((operazione1) * (operazione2));
+       sommatoria2 += ((operazione1) * (operazione1));
+       sommatoria3 += ((operazione2) * (operazione2));
     }
     return fabsf((type) (sommatoria1 / (sqrtf(sommatoria2 * sommatoria3))));
 }*/
-extern float calcola_rff(const float *ds, int N, int d, int fx, int fy, type media_elem_fx, type media_elem_fy, type* ret);
+extern type calcola_rff_new(const float *ds, int N, int fx, int fy, type media_elem_fx, type media_elem_fy, type* ret);
 
 
 type somma_rcf(const type *rcf, int dim, const int* out) {
@@ -382,15 +402,17 @@ type calcola_merit(params *input, const type *ds, int N, int d, int f, type medi
     type rff_tot = 0;
 
     for (int i = 0; i < dim; i++) {
+        //rff_tot += fabsf(calcola_rff_new(ds, N, d, f, out[i], media_elem[f],media_elem[out[i]]));
+        //printf("RFF tra %d e %d è: %f\n",f,out[i], fabsf(calcola_rff_new(ds, N, d, f, out[i], media_elem[f],media_elem[out[i]])));
         type x=0;
-        calcola_rff(ds, N, d, f, out[i], media_elem[f],media_elem[out[i]] ,&x);
-        //printf("RFF %d - %d: %f\n",f,i,fabsf(x));
+        calcola_rff_new(ds, N, f, out[i], media_elem[f],media_elem[out[i]] ,&x);
+        //printf("RFF %d - %d: %f\n",f,out[i],fabsf(x));
         rff_tot+=fabsf(x);
     }
     input->rff[f] = rff_tot;
     return (type) (((type) (dim+1) * (somma_rcf(rcf,dim,out)+rcf[f])/(type)(dim+1) / (sqrtf((type) (dim+1) + ((type) (dim+1) * ((type) (dim+1) - 1) *
-                                                                                                                            (rff_tot + rff_totale) /
-                                                                                                                         (type) (dim+coppie))))));
+                                                                                                              (rff_tot + rff_totale) /
+                                                                                                              (type) (dim+coppie))))));
 }
 int checkout(const int* out,int dim, int f){
     for(int i=0; i< dim; i++){
@@ -414,15 +436,23 @@ void cfs(params *input, type media_elem[]) {
     int k = input->k;
     type *ds = input->ds;
     int N = input->N;
+    type* labels = input->labels;
+
+    //printf("La feature %d ha valore %f\n",0,ds[0]);
+    //printf("Valore medio di %d è: %f\n",0,media_elem[0]);
+
+    type* precomputed_means = (type *)malloc(2 * d * sizeof(type));
+    if (precomputed_means == NULL) {
+        fprintf(stderr, "Errore di allocazione memoria per precomputed_means\n");
+        exit(1);
+    }
+
+    // Calcola i valori medi precalcolati
+    precompute_means(ds, labels, N, d, precomputed_means);
 
     input->rff=alloc_matrix(N,d);
 
-    rcf = calcola_max_rcf(input, ds, d, N);
-
-    printf("ds[%d]-mux è: %f\n",0,ds[0]-media_elem[0]);
-    printf("ds[%d]-mux è: %f\n",45,ds[45]-media_elem[45]);
-    printf("ds[%d] è: %f\n",0,ds[0]);
-    printf("ds[%d]  è: %f\n",45,ds[45]);
+    rcf = calcola_max_rcf(input, ds, d, N, precomputed_means);
 
 
     while (input->dim < k) {
@@ -453,8 +483,6 @@ void cfs(params *input, type media_elem[]) {
     }
     input->sc = merit_massimissimo;
 }
-
-extern void hello_world();
 
 int main(int argc, char **argv) {
     char fname[256];
@@ -551,7 +579,6 @@ int main(int argc, char **argv) {
 
 
     input->ds = load_data(dsfilename, &input->N, &input->d);
-
     int nl, dl;
     input->labels = load_data(labelsfilename, &nl, &dl);
 
@@ -593,7 +620,6 @@ int main(int argc, char **argv) {
 
     t = clock();
     cfs(input, media_elem);
-    //hello_world();
     t = clock() - t;
     time = ((float) t) / CLOCKS_PER_SEC;
 
