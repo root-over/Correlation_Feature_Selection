@@ -125,10 +125,8 @@ void dealloc_matrix(void *mat) {
 *
 */
 MATRIX load_data(char *filename, int *n, int *k) {
-    FILE *fp;
+    FILE *fp = fopen(filename, "rb"); //apre il file in lettura binaria
     int rows, cols;
-
-    fp = fopen(filename, "rb"); //apre il file in lettura binaria
 
     if (fp == NULL) {
         printf("'%s': nome del file errato!\n", filename);
@@ -243,36 +241,6 @@ void save_out(char *filename, type sc, int *X, int k) {
 
 extern void prova(params *input);
 
-type media_valori_0_f(const type *ds, const type *labels, int N, int d, int f) {
-    type somma = 0;
-    int contatore = 0;
-    int inizio = f*N;
-
-    for (int i = 0; i < N; i ++) {
-        if (labels[i] == 0) {
-            somma = somma + ds[inizio + i];
-            contatore++;
-        }
-    }
-
-    return somma / (type) contatore;
-}
-
-type media_valori_1_f(const type *ds, const type *labels, int N, int d, int f) {
-    type somma = 0;
-    int contatore = 0;
-    int inizio = f*N;
-
-    for (int i = 0; i < N; i ++) {
-        if (labels[i] == 1) {
-            somma = somma + ds[inizio + i];
-            contatore++;
-        }
-    }
-
-    return somma / (type) contatore;
-}
-
 //GIUSTO
 int conta_elementi_1(const type *labels, int N) {
     int contatore = 0;
@@ -285,9 +253,9 @@ int conta_elementi_1(const type *labels, int N) {
 }
 
 //GIUSTO
-type calcola_media(const type *ds, int N, int d, int f) {
+type calcola_media(const type *ds, int N, int f) {
     type somma = 0;
-    int inizio = f*N;
+    int inizio = f * N;
     for (int i = 0; i < N; i ++) {
         somma += ds[inizio + i];
     }
@@ -295,8 +263,8 @@ type calcola_media(const type *ds, int N, int d, int f) {
 }
 
 //GIUSTO
-type deviazione_standard_c(const type *ds, int N, int d, int f) {
-    type media = calcola_media(ds, N, d, f);
+type deviazione_standard_c(const type *ds, int N, int f) {
+    type media = calcola_media(ds, N, f);
     type somma_quadrati_diff = 0;
     int inizio = f*N;
 
@@ -307,11 +275,11 @@ type deviazione_standard_c(const type *ds, int N, int d, int f) {
     return sqrtf(somma_quadrati_diff / (type) (N-1));
 }
 // Metodo per precalcolare i valori medi per ogni feature
-void precompute_means(type *ds, type *labels, int N, int d, type *precomputed_means) {
+void precalcola_rcf(const type *ds, const type *labels, int N, int d, type *precomputed_means) {
     for (int f = 0; f < d; f++) {
-        type sum_0 = 0.0;
+        type sum_0 = 0;
         int count_0 = 0;
-        type sum_1 = 0.0;
+        type sum_1 = 0;
         int count_1 = 0;
 
         for (int i = 0; i < N; i++) {
@@ -330,12 +298,11 @@ void precompute_means(type *ds, type *labels, int N, int d, type *precomputed_me
 }
 
 //GIUSTO
-// Funzione ottimizzata per calcolare Rcf
-type calcola_rcf(const type *ds, const type *labels, int N, int d, int f, int n0, int n1, const type* precomputed_means) {
+type calcola_rcf(const type *ds, int N, int f, int n0, int n1, const type* precomputed_means) {
     type mu0 = precomputed_means[f * 2];     // Utilizzando il valore medio per la classe 0
     type mu1 = precomputed_means[f * 2 + 1]; // Utilizzando il valore medio per la classe 1
 
-    type sf = deviazione_standard_c(ds, N, d, f);
+    type sf = deviazione_standard_c(ds, N, f);
 
     int n = n0 + n1;
     return fabsf(((mu0 - mu1) / sf) * sqrtf((type)(n0 * n1) / (type)(n * n)));
@@ -353,7 +320,7 @@ type* calcola_max_rcf(params *input, const type *ds, int d, int N, type* precomp
     int n0 = N - n1;
 
     for (int i = 0; i < d; i++) {
-        rcf[i] = calcola_rcf(ds, label, N, d, i, n0, n1, precomputed_means);
+        rcf[i] = calcola_rcf(ds, N, i, n0, n1, precomputed_means);
 
         if (rcf[i] > rcf_max) {
             f_rcf_max = i;
@@ -386,7 +353,7 @@ type calcola_rff(const type *ds, int N, int d, int fx, int fy, type media_elem_f
     }
     return fabsf((type) (sommatoria1 / (sqrtf(sommatoria2 * sommatoria3))));
 }*/
-extern type calcola_rff_new(const float *ds, int N, int fx, int fy, type media_elem_fx, type media_elem_fy, type* ret);
+extern type calcola_rff_new(const type *ds, int N, int fx, int fy, type media_elem_fx, type media_elem_fy, type* ret);
 
 
 type somma_rcf(const type *rcf, int dim, const int* out) {
@@ -397,7 +364,7 @@ type somma_rcf(const type *rcf, int dim, const int* out) {
     return rcf_tot;
 }
 
-type calcola_merit(params *input, const type *ds, int N, int d, int f, type media_elem[], type *rcf, int *out,
+type calcola_merit(params *input, const type *ds, int N, int f, type media_elem[], type *rcf, int *out,
                    type rff_totale, int dim, int coppie) {
     type rff_tot = 0;
 
@@ -438,9 +405,6 @@ void cfs(params *input, type media_elem[]) {
     int N = input->N;
     type* labels = input->labels;
 
-    //printf("La feature %d ha valore %f\n",0,ds[0]);
-    //printf("Valore medio di %d è: %f\n",0,media_elem[0]);
-
     type* precomputed_means = (type *)malloc(2 * d * sizeof(type));
     if (precomputed_means == NULL) {
         fprintf(stderr, "Errore di allocazione memoria per precomputed_means\n");
@@ -448,7 +412,7 @@ void cfs(params *input, type media_elem[]) {
     }
 
     // Calcola i valori medi precalcolati
-    precompute_means(ds, labels, N, d, precomputed_means);
+    precalcola_rcf(ds, labels, N, d, precomputed_means);
 
     input->rff=alloc_matrix(N,d);
 
@@ -460,7 +424,7 @@ void cfs(params *input, type media_elem[]) {
         type rff_totale = input->rff_totale;
         for (int i = 0; i < d; i++) { //per ogni feature f (in questo caso d)
             if(checkout(out,input->dim,i)==0){
-                merit_attuale = calcola_merit(input, ds, N, d, i, media_elem, rcf, out, rff_totale,
+                merit_attuale = calcola_merit(input, ds, N, i, media_elem, rcf, out, rff_totale,
                                               input->dim,coppie); //passo la feature i-esima
                 if (merit_attuale > merit_max) {
                     merit_max = merit_attuale;
@@ -615,7 +579,7 @@ int main(int argc, char **argv) {
     int N = input->N;
     type media_elem[d]; //Media degli elementi di ogni feature
     for (int i = 0; i < d; i++) {
-        media_elem[i] = calcola_media(ds, N, d, i);
+        media_elem[i] = calcola_media(ds, N, i);
     }
 
     t = clock();
