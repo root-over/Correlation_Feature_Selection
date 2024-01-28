@@ -75,43 +75,78 @@ extern free_block
 ; Funzione prova
 ; ------------------------------------------------------------
 global prova
+global calcola_rff_new
 
 msg	db 'sc:',32,0
 nl	db 10,0
 
-prova:
-		; ------------------------------------------------------------
-		; Sequenza di ingresso nella funzione
-		; ------------------------------------------------------------
-		push		rbp				; salva il Base Pointer
-		mov		rbp, rsp			; il Base Pointer punta al Record di Attivazione corrente
-		pushaq						; salva i registri generali
+section .text
 
-		; ------------------------------------------------------------
-		; I parametri sono passati nei registri
-		; ------------------------------------------------------------
-		; rdi = indirizzo della struct input
-		
-		; esempio: stampa input->sc
-        ; [RDI] input->ds; 			// dataset
-		; [RDI + 8] input->labels; 	// etichette
-		; [RDI + 16] input->out;	// vettore contenente risultato dim=(k+1)
-		; [RDI + 24] input->sc;		// score dell'insieme di features risultato
-		; [RDI + 32] input->k; 		// numero di features da estrarre
-		; [RDI + 36] input->N;		// numero di righe del dataset
-		; [RDI + 40] input->d;		// numero di colonne/feature del dataset
-		; [RDI + 44] input->display;
-		; [RDI + 48] input->silent;
-		VMOVSD		XMM0, [RDI+24]
-		VMOVSD		[sc], XMM0
-		prints 		msg
-		printsd		sc
-		prints 		nl
-		; ------------------------------------------------------------
-		; Sequenza di uscita dalla funzione
-		; ------------------------------------------------------------
-		
-		popaq				; ripristina i registri generali
-		mov		rsp, rbp	; ripristina lo Stack Pointer
-		pop		rbp		; ripristina il Base Pointer
-		ret				; torna alla funzione C chiamante
+calcola_rff_new:
+    start
+    ; Carica gli argomenti nei registri
+    ;ds = RDI
+    ;N = RSI
+    ;fx = RDX
+    ;fy = RCX
+    ;media_elem_fx = xmm0
+    ;media_elem_fy = xmm1
+    ;ret = R8
+
+    ; Inizializza le variabili locali (sommatoria1, sommatoria2, sommatoria3)
+    vxorps xmm2, xmm2, xmm2 ; Azzera xmm2, xmm3, xmm4 per le sommatorie
+    vxorps xmm3, xmm3, xmm3
+    vxorps xmm4, xmm4, xmm4
+
+    ; Calcola inizio_fx = fx * N
+    imul rdx, rsi           ; rsi = fx * N
+    imul rcx, rsi           ; rdx = fy * N
+
+    ; Preparazione per il ciclo
+    xor rax, rax            ; i = 0
+
+inizio_ciclo:
+    cmp rax, rsi            ; Confronta i con N
+    jge fine_ciclo          ; Se i >= N, salta a fine_ciclo
+
+    ; Calcola operazione1 = ds[inizio_fx + i] - mux
+    mov rbx, rdx            ; Copia inizio_fx in rbx
+    add rbx, rax            ; Aggiungi i a inizio_fx (rax = inizio_fx + i)
+    vmovss xmm5, [rdi + rbx*8] ; Carica ds[inizio_fx + i] in xmm5
+    ;FIXME sbagliato perche dentro xmm0 c'è il valore sbagliato (il calcolo è giusto)
+    vsubss xmm5, xmm5, xmm0 ; xmm5 = xmm5 - mux (operazione1)
+
+    ; Calcola operazione2 = ds[inizio_fy + i] - muy
+    mov rbx, rcx            ; Carica fy in rbx
+    add rbx, rax            ; Aggiungi i a inizio_fy (rax = inizio_fy + i)
+    vmovss xmm6, [rdi + rbx*8] ; Carica ds[inizio_fy + i] in xmm6
+    vsubss xmm6, xmm6, xmm1 ; xmm6 = xmm6 - muy (operazione2)
+
+    ; Calcola sommatoria1 += ((operazione1) * (operazione2))
+    vmovss xmm7, xmm5       ; xmm7 = xmm5 (ds[fx])
+    vmulss xmm7, xmm7, xmm6 ; xmm7 = operazione1 * operazione2
+    vaddss xmm2, xmm2, xmm7 ; sommatoria1 += xmm7
+
+    ; Calcola sommatoria2 += ((operazione1) * (operazione1))
+    vmulss xmm5, xmm5, xmm5 ; xmm5 = operazione1 * operazione1
+    vaddss xmm3, xmm3, xmm5 ; sommatoria2 += xmm5
+
+    ; Calcola sommatoria3 += ((operazione2) * (operazione2))
+    vmulss xmm6, xmm6, xmm6 ; xmm6 = operazione2 * operazione2
+    vaddss xmm4, xmm4, xmm6 ; sommatoria3 += xmm6
+
+    ; Incrementa il contatore del ciclo
+    inc rax
+    jmp inizio_ciclo
+fine_ciclo:
+
+    ; Calcola sqrtf(sommatoria2 * sommatoria3)
+    vmulss xmm3, xmm3, xmm4 ; xmm3 = sommatoria2 * sommatoria3
+    vsqrtss xmm3, xmm3, xmm3 ; xmm3 = sqrt(sommatoria2 * sommatoria3)
+
+    ; Calcola sommatoria1 / sqrt(sommatoria2 * sommatoria3)
+    vdivss xmm2, xmm2, xmm3 ; xmm2 = sommatoria1 / sqrt(sommatoria2 * sommatoria3)
+
+    ; Prepara il valore di ritorno
+    vmovss [r8], xmm2
+    stop
